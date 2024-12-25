@@ -1,3 +1,12 @@
+import rpyc
+
+
+
+HOST        = "localhost"
+SERVER_PORT = 18861
+
+
+
 def display_commands():
     print("""
     Welcome to sym-DFS Project Client.
@@ -9,18 +18,24 @@ def display_commands():
     exit                Exits
     show-commands       Shows commands
     """)
+    # To-do:
+    # - Aggiungere comandi per interagire con i file servers.
 
 
 def main_prompt():
+    user_is_logged  = False
     logged_username = None
-
+    
+    print("Connecting to the name server...")
+    conn            = rpyc.connect(HOST, SERVER_PORT)
+    print(dir(conn.root))
     # Show available commands.
     display_commands()
 
     while True:
         # Get user input.
         command = input(
-            "({})>".format("non-auth" if logged_username is None else logged_username)
+            "({})>".format("non-auth" if user_is_logged else logged_username)
             )
         
         match command:
@@ -31,7 +46,10 @@ def main_prompt():
                 # To-do: aggiungere chiamata alla procedura di logout.
                 continue
             case "create-user":
-                # To-do: aggiungere chiamata alla procedura di creazione.
+                username = input("Insert username: ")
+                password = input("Insert password: ")
+                result = conn.root.create_user(username, password, False)
+                print(result)
                 continue
             case "delete-user":
                 # To-do: aggiungere chiamata alla procedura di cancellazione.
