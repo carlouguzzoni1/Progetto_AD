@@ -68,11 +68,13 @@ class RegularClient(BaseClient):
     def delete_user(self):
         """Deletes a regular user."""
         
-        # To-do: un utente regolare non deve poter cancellare un utente root.
-        username = input("Insert username: ")
-        password = input("Insert password: ")
-        result = self.conn.root.delete_user(username, password)
-        print(result)
+        if not self.user_is_logged:
+            print("You must be logged in to delete a user.")
+        else:
+            username = input("Insert username: ")
+            password = input("Insert password: ")
+            result = self.conn.root.delete_user(username, password)
+            print(result)
 
 
     def main_prompt(self):
