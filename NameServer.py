@@ -13,16 +13,15 @@ SERVER_PORT = 18861
 
 class NameServerService(rpyc.Service):
     """
-    Implements the name server, which:
-    - Mantains a database with user, file and server information
-    To-do: finire documentazione.
+    Represents the name server.
+    TODO: finire documentazione.
     """
 
     def __init__(self, host="localhost", port=SERVER_PORT):
         self.db_path        = DB_PATH
         self.server_port    = port
         self._setup_database()
-        # To-do: inserire procedura di inizializzazione dei file servers presenti nel database.
+        # TODO: inserire procedura di inizializzazione dei file servers presenti nel database.
 
 
     def _setup_database(self):
@@ -48,7 +47,7 @@ class NameServerService(rpyc.Service):
                 );
             """)
             
-            # To-do: aggiungere le altre tabelle - file servers/metadati?
+            # TODO: aggiungere le altre tabelle - file servers/metadati?
             
             conn.commit()
             conn.close()
@@ -100,36 +99,71 @@ class NameServerService(rpyc.Service):
             dict:           A dictionary containing the result of the operation.
         """
         
-        # To-do: aggiungere controllo on-line/off-line?
         conn    = sqlite3.connect(self.db_path)
         cursor  = conn.cursor()
-        cursor.execute("SELECT password_hash FROM users WHERE username = ?", (username,))
-        result  = cursor.fetchone()
+        report  = dict()
         
-        report = dict()
+        # Get user online status, hashed password and directory.
+        try:
+            cursor.execute("""
+                SELECT is_online, password_hash, directory
+                FROM users
+                WHERE username = ?
+                """,
+                (username,)
+                )
+            result  = cursor.fetchone()
+        except sqlite3.DatabaseError as e:
+            # Generic database error.
+            print(e)
+            report["status"]    = False
+            report["message"]   = f"Error connecting to the database."
+            return report
         
+        # Check whether login can't be done.
+        # If user doesn't exist.
         if result is None:
             report["status"]    = False
             report["message"]   = f"Error: user '{username}' not found."
+            conn.close()
             return report
-        
-        # Check password.
-        password_match = checkpw(password.encode('utf-8'), result[0])
-        
-        # Get user directory.
-        cursor.execute("SELECT directory FROM users WHERE username = ?", (username,))
-        directory = cursor.fetchone()[0]
-        
-        if password_match:
-            report["status"]    = True
-            report["message"]   = f"User '{username}' authenticated successfully."
-            report["directory"] = directory
-        else:
+        # Check user online status.
+        if result[0]:
+            report["status"]    = False
+            report["message"]   = f"Error: user '{username}' already logged in."
+            conn.close()
+            return report
+        # Check user password validity.
+        password_match = checkpw(password.encode('utf-8'), result[1])
+        if not password_match:
             report["status"]    = False
             report["message"]   = f"Error: wrong password for user '{username}'."
+            conn.close()
+            return report
+        
+        # If login can be done.
+        report["status"]        = True
+        report["message"]       = f"User '{username}' authenticated successfully."
+        report["directory"]     = result[2]
+        # Try to update user online status.
+        try:
+            cursor.execute("""
+                UPDATE users
+                SET is_online = 1
+                WHERE username = ?
+                """,
+                (username,)
+                )
+            conn.commit()
+        except sqlite3.DatabaseError as e:
+            # Generic database error.
+            print(e)
+            report["status"]    = False
+            report["message"]   = f"Error connecting to the database."
+            conn.close()
+            return report
         
         conn.close()
-        
         return report
 
 
@@ -143,32 +177,56 @@ class NameServerService(rpyc.Service):
             str:            A message indicating the result of the operation.
         """
         
-        # To-do: cancellazione non funziona. Debug.
         conn            = sqlite3.connect(self.db_path)
         cursor          = conn.cursor()
         hashed_password = hashpw(password.encode('utf-8'), gensalt())
         
-        report = dict()
-        
         try:
+            # Get user root status, hashed password, online status and directory.
+            cursor.execute("""
+                SELECT is_root, password_hash, is_online, directory
+                FROM users
+                WHERE username = ?
+                """,
+                (username,)
+                )
+            result = cursor.fetchone()
+            # Check user existence.
+            if result is None:
+                conn.close()
+                return f"Error: user '{username}' not found."
+            # Check user root status.
+            if result[0]:
+                conn.close()
+                return f"Error: you don't have the needed permissions to delete user '{username}'."
+            # Check user online status.
+            if result[2]:
+                conn.close()
+                return f"Error: user '{username}' is currently logged in."
+            # Check user password validity.
+            password_match = checkpw(password.encode('utf-8'), result[1])
+            if not password_match:
+                conn.close()
+                return f"Error: wrong password for user '{username}'."
             # Get user directory.
-            cursor.execute("SELECT directory FROM users WHERE username = ?", (username,))
-            directory = cursor.fetchone()[0]
+            directory = result[3]
             # Delete the user.
             cursor.execute(
                 """
-                DELETE FROM users WHERE username = ? AND password_hash = ?
+                DELETE FROM users WHERE username = ?
                 """,
-                (username, hashed_password)
-            )
+                (username,)
+                )
             conn.commit()
-            # Delete user directory.
+            # Delete the user directory.
             shutil.rmtree(directory)
-            return f"User '{username}' deleted successfully."
-        except sqlite3.IntegrityError:
-            return f"Error: user '{username}' not found or wrong password."
-        finally:
             conn.close()
+            return f"User '{username}' deleted successfully."
+        except sqlite3.DatabaseError as e:
+            # Generic database error.
+            print(e)
+            conn.close()
+            return f"Error deleting user."
 
 
 
