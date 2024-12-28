@@ -6,6 +6,7 @@ from bcrypt import hashpw, gensalt, checkpw
 
 
 
+LOCKFILE_PATH = "./NS/nameserver.lock"
 DB_PATH     = "./NS/NS.db"
 SERVER_PORT = 18861
 
@@ -14,16 +15,52 @@ SERVER_PORT = 18861
 class NameServerService(rpyc.Service):
     """
     Represents the name server.
-    TODO: finire documentazione.
     """
-
+    # TODO: decidere quali altre tabelle introdurre nel database.
+    # TODO: inserire procedura di inizializzazione name servers all'atto di creazione.
+    # TODO: finire documentazione della classe.
+    # CHECKDOC: NameServerService esegue atomicamente i metodi RPC?
+    # CHECKDOC: NameServerService necessita di programmazione concorrente esplicita?
+    
+    _instance   = None          # NameServerService active instance.
+    _lock_file  = LOCKFILE_PATH # File used to lock the file server.
+    
+    
+    def __new__(cls, *args, **kwargs):
+        """Creates a new name server."""
+        
+        if cls._instance is None:
+            # Check if name server is already running.
+            if os.path.exists(cls._lock_file):
+                raise RuntimeError("Error: name server already running!")
+            
+            # Create a new name server.
+            cls._instance = super(NameServerService, cls).__new__(cls)
+            
+            # Lock the name server.
+            # CHECKDOC: la procedura di locking è sicura?
+            with open(cls._lock_file, "w") as lock:
+                lock.write("locked")
+        
+        return cls._instance
+    
+    
     def __init__(self, host="localhost", port=SERVER_PORT):
         self.db_path        = DB_PATH
         self.server_port    = port
+        
         self._setup_database()
-        # TODO: inserire procedura di inizializzazione dei file servers presenti nel database.
-
-
+        # Procedura di inizializzazione dei file servers qua.
+    
+    
+    def __del__(self):
+        """Removes the lock file when the name server is deleted."""
+        
+        # Remove the lock file.
+        if os.path.exists(self._lock_file):
+            os.remove(self._lock_file)
+    
+    
     def _setup_database(self):
         """
         Creates the nameserver's database (if it doesn't exist) and initializes it.
@@ -47,13 +84,13 @@ class NameServerService(rpyc.Service):
                 );
             """)
             
-            # TODO: aggiungere le altre tabelle - file servers/metadati?
+            # Creazione delle altre tabelle qua.
             
             conn.commit()
             conn.close()
             print("Database created.")
-
-
+    
+    
     def exposed_create_user(self, username, password, is_root=False):
         """
         Creates a new user.
@@ -80,11 +117,15 @@ class NameServerService(rpyc.Service):
                 (username, hashed_password, is_root, False, directory)
             )
             conn.commit()
+            
             # Create the directory for the user.
             os.mkdir(directory)
+            
             return f"User '{username}' created successfully."
+        
         except sqlite3.IntegrityError:
             return f"Error: user '{username}' already exists."
+        
         finally:
             conn.close()
 
@@ -113,38 +154,49 @@ class NameServerService(rpyc.Service):
                 (username,)
                 )
             result  = cursor.fetchone()
+        
         except sqlite3.DatabaseError as e:
             # Generic database error.
             print(e)
             report["status"]    = False
             report["message"]   = f"Error connecting to the database."
+            conn.close()
+            
             return report
         
         # Check whether login can't be done.
+        
         # If user doesn't exist.
         if result is None:
             report["status"]    = False
             report["message"]   = f"Error: user '{username}' not found."
             conn.close()
+            
             return report
+        
         # Check user online status.
         if result[0]:
             report["status"]    = False
             report["message"]   = f"Error: user '{username}' already logged in."
             conn.close()
+            
             return report
+        
         # Check user password validity.
         password_match = checkpw(password.encode('utf-8'), result[1])
+        
         if not password_match:
             report["status"]    = False
             report["message"]   = f"Error: wrong password for user '{username}'."
             conn.close()
+            
             return report
         
         # If login can be done.
         report["status"]        = True
         report["message"]       = f"User '{username}' authenticated successfully."
         report["directory"]     = result[2]
+        
         # Try to update user online status.
         try:
             cursor.execute("""
@@ -155,15 +207,18 @@ class NameServerService(rpyc.Service):
                 (username,)
                 )
             conn.commit()
+        
         except sqlite3.DatabaseError as e:
             # Generic database error.
             print(e)
             report["status"]    = False
             report["message"]   = f"Error connecting to the database."
             conn.close()
+        
             return report
         
         conn.close()
+        
         return report
 
 
@@ -191,25 +246,35 @@ class NameServerService(rpyc.Service):
                 (username,)
                 )
             result = cursor.fetchone()
+            
             # Check user existence.
             if result is None:
                 conn.close()
+            
                 return f"Error: user '{username}' not found."
+            
             # Check user root status.
             if result[0]:
                 conn.close()
+            
                 return f"Error: you don't have the needed permissions to delete user '{username}'."
+            
             # Check user online status.
             if result[2]:
                 conn.close()
+            
                 return f"Error: user '{username}' is currently logged in."
+            
             # Check user password validity.
             password_match = checkpw(password.encode('utf-8'), result[1])
+            
             if not password_match:
                 conn.close()
                 return f"Error: wrong password for user '{username}'."
+            
             # Get user directory.
             directory = result[3]
+            
             # Delete the user.
             cursor.execute(
                 """
@@ -218,14 +283,18 @@ class NameServerService(rpyc.Service):
                 (username,)
                 )
             conn.commit()
+            
             # Delete the user directory.
             shutil.rmtree(directory)
             conn.close()
+            
             return f"User '{username}' deleted successfully."
+        
         except sqlite3.DatabaseError as e:
             # Generic database error.
             print(e)
             conn.close()
+            
             return f"Error deleting user."
 
 
@@ -234,6 +303,7 @@ if __name__ == "__main__":
     from rpyc.utils.server import ThreadedServer
     
     server = ThreadedServer(NameServerService, port=SERVER_PORT)
+    
     print("Welcome to sym-DFS Project Server.")
     print("Starting name server...")
     server.start()

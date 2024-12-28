@@ -2,9 +2,10 @@ from abc import ABC, abstractmethod
 import rpyc
 
 
+
 class BaseClient(ABC):
     """Abstract base class for client classes."""
-
+    
     def __init__(self, host="localhost", port=18861):
         """Initializes the client.
         Args:
@@ -17,8 +18,8 @@ class BaseClient(ABC):
         self.user_is_logged     = False
         self.logged_username    = None
         self.files_dir          = None
-
-
+    
+    
     def connect(self):
         """Establishes a connection to the name server."""
         try:
@@ -28,8 +29,8 @@ class BaseClient(ABC):
         except Exception as e:
             print(f"Error connecting to the server: {e}")
             exit(1)
-
-
+    
+    
     @abstractmethod
     def display_commands(self):
         """Displays the available commands for the client."""
