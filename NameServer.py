@@ -16,7 +16,6 @@ class NameServerService(rpyc.Service):
     """
     Represents the name server.
     """
-    # TODO: decidere quali altre tabelle introdurre nel database.
     # TODO: inserire procedura di inizializzazione name servers all'atto di creazione.
     # TODO: finire documentazione della classe.
     # CHECKDOC: NameServerService esegue atomicamente i metodi RPC?
@@ -84,7 +83,39 @@ class NameServerService(rpyc.Service):
                 );
             """)
             
-            # Creazione delle altre tabelle qua.
+            # Create file servers table.
+            cursor.execute("""
+                CREATE TABLE file_servers (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    address TEXT UNIQUE,
+                    port INTEGER,
+                    last_heartbeat TIMESTAMP
+                );
+            """)
+            
+            # Create files table.
+            cursor.execute("""
+                CREATE TABLE files (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT,
+                    size INTEGER,
+                    checksum TEXT,
+                    primary_server_id INTEGER,
+                    FOREIGN KEY (primary_server_id) REFERENCES file_servers (id),
+                    FOREIGN KEY (owner) REFERENCES users (username)
+                );
+            """)
+            
+            # Create replicas table.
+            cursor.execute("""
+                CREATE TABLE replicas (
+                    file_id INTEGER,
+                    server_id INTEGER,
+                    FOREIGN KEY (file_id) REFERENCES files (id),
+                    FOREIGN KEY (server_id) REFERENCES file_servers (id),
+                    PRIMARY KEY (file_id, server_id)
+                );
+            """)
             
             conn.commit()
             conn.close()
