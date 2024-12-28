@@ -4,7 +4,11 @@ from BaseClient import BaseClient
 
 class RegularClient(BaseClient):
     """Client class for regular users."""
-    # TODO: visualizzazione stato dei propri files, upload e download.
+    # TODO: rimuovere i parametri di default nel metodo __init__ (app-starter).
+    # TODO: usare i parametri da riga di comando (app-starter).
+    # TODO: implementare visualizzazione stato dei propri files (dfs).
+    # TODO: implementare upload (dfs).
+    # TODO: implementare download (dfs).
     
     def __init__(self, host="localhost", port=18861):
         """
