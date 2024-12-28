@@ -1,11 +1,11 @@
 from BaseClient import BaseClient
-import rpyc
 
 
 
 class RegularClient(BaseClient):
     """Client class for regular users."""
-
+    # TODO: visualizzazione stato dei propri files, upload e download.
+    
     def __init__(self, host="localhost", port=18861):
         """
         Initializes the client.
@@ -14,8 +14,8 @@ class RegularClient(BaseClient):
             port (int): The port number of the name server.
         """
         super().__init__(host, port)
-
-
+    
+    
     def display_commands(self):
         print("""
         Welcome to sym-DFS Project Client.
@@ -27,23 +27,23 @@ class RegularClient(BaseClient):
         exit                Exit
         show-commands       Show commands
         """)
-
-
+    
+    
     def login(self):
         """Authenticates a regular user."""
         
         username    = input("Insert username: ")
         password    = input("Insert password: ")
         result      = self.conn.root.authenticate(username, password)
-
+        
         if result["status"]:
             self.user_is_logged     = True
             self.logged_username    = username
             self.files_dir          = result["directory"]
         
         print(result["message"])
-
-
+    
+    
     def logout(self):
         """Logs out the current user."""
         
@@ -54,8 +54,8 @@ class RegularClient(BaseClient):
             print("Logged out successfully.")
         else:
             print("No user is logged in.")
-
-
+    
+    
     def create_user(self):
         """Creates a new regular user."""
         
@@ -63,8 +63,8 @@ class RegularClient(BaseClient):
         password = input("Insert password: ")
         result = self.conn.root.create_user(username, password, False)
         print(result)
-
-
+    
+    
     def delete_user(self):
         """Deletes a regular user."""
         
@@ -75,20 +75,20 @@ class RegularClient(BaseClient):
             password = input("Insert password: ")
             result = self.conn.root.delete_user(username, password)
             print(result)
-
-
+    
+    
     def main_prompt(self):
         """Main prompt for regular users."""
         
         self.connect()              # Connect to the name server.
         self.display_commands()     # Display the available commands.
-
+        
         while True:
             # Get user input.
             command = input(
                 "({})> ".format(self.logged_username if self.user_is_logged else "non-auth")
             )
-
+            
             # Execute the command.
             match command:
                 case "login":
