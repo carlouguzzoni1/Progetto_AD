@@ -6,9 +6,9 @@ from bcrypt import hashpw, gensalt, checkpw
 
 
 
-LOCKFILE_PATH = "./NS/nameserver.lock"
-DB_PATH     = "./NS/NS.db"
-SERVER_PORT = 18861
+LOCKFILE_PATH   = "./NS/nameserver.lock"
+DB_PATH         = "./NS/NS.db"
+SERVER_PORT     = 18861
 
 
 
@@ -16,9 +16,15 @@ class NameServerService(rpyc.Service):
     """
     Represents the name server.
     """
-    # TODO: decidere quali altre tabelle introdurre nel database.
-    # TODO: inserire procedura di inizializzazione name servers all'atto di creazione.
-    # TODO: finire documentazione della classe.
+    # TODO: finire documentazione della classe (app-starter).
+    # TODO: inserire flag on/off sui file servers per controllo da root client (dfs).
+    # TODO: inserire campo intero per la dimensione del file server (dfs).
+    # TODO: implementare upload (dfs).
+    #       Occorre load balancing con K-least loaded.
+    # TODO: implementare download (dfs).
+    #       Mettere un controllo sul proprietario del file.
+    
+    
     # CHECKDOC: NameServerService esegue atomicamente i metodi RPC?
     # CHECKDOC: NameServerService necessita di programmazione concorrente esplicita?
     
@@ -38,7 +44,6 @@ class NameServerService(rpyc.Service):
             cls._instance = super(NameServerService, cls).__new__(cls)
             
             # Lock the name server.
-            # CHECKDOC: la procedura di locking è sicura?
             with open(cls._lock_file, "w") as lock:
                 lock.write("locked")
         
@@ -50,7 +55,6 @@ class NameServerService(rpyc.Service):
         self.server_port    = port
         
         self._setup_database()
-        # Procedura di inizializzazione dei file servers qua.
     
     
     def __del__(self):
@@ -84,9 +88,44 @@ class NameServerService(rpyc.Service):
                 );
             """)
             
-            # Creazione delle altre tabelle qua.
+            # Create file servers table.
+            cursor.execute("""
+                CREATE TABLE file_servers (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    address TEXT UNIQUE,
+                    port INTEGER,
+                    last_heartbeat TIMESTAMP
+                );
+            """)
+            
+            # Create files table.
+            cursor.execute("""
+                CREATE TABLE files (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT,
+                    size INTEGER,
+                    checksum TEXT,
+                    primary_server_id INTEGER,
+                    FOREIGN KEY (primary_server_id) REFERENCES file_servers (id),
+                    FOREIGN KEY (owner) REFERENCES users (username)
+                );
+            """)
+            
+            # Create replicas table.
+            cursor.execute("""
+                CREATE TABLE replicas (
+                    file_id INTEGER,
+                    server_id INTEGER,
+                    FOREIGN KEY (file_id) REFERENCES files (id),
+                    FOREIGN KEY (server_id) REFERENCES file_servers (id),
+                    PRIMARY KEY (file_id, server_id)
+                );
+            """)
             
             conn.commit()
+            
+            # Inserire procedura di inizializzazione file servers qua.
+            
             conn.close()
             print("Database created.")
     
@@ -128,8 +167,8 @@ class NameServerService(rpyc.Service):
         
         finally:
             conn.close()
-
-
+    
+    
     def exposed_authenticate(self, username, password):
         """
         Authenticates a user.
@@ -220,8 +259,8 @@ class NameServerService(rpyc.Service):
         conn.close()
         
         return report
-
-
+    
+    
     def exposed_delete_user(self, username, password):
         """
         Deletes a user.

@@ -5,6 +5,7 @@ import rpyc
 
 class BaseClient(ABC):
     """Abstract base class for client classes."""
+    # TODO: rimuovere parametri di default nel metodo __init__ (app-starter).
     
     def __init__(self, host="localhost", port=18861):
         """Initializes the client.
