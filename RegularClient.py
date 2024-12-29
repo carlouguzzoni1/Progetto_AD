@@ -5,9 +5,6 @@ from BaseClient import BaseClient
 
 class RegularClient(BaseClient):
     """Client class for regular users."""
-    # TODO: implementare visualizzazione stato dei propri files (dfs).
-    # TODO: implementare upload (dfs).
-    # TODO: implementare download (dfs).
     
     def __init__(self, host, port):
         """

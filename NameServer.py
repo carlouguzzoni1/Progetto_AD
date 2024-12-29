@@ -17,15 +17,18 @@ class NameServerService(rpyc.Service):
     Represents the name server, which is the central node in the sym-DFS architecture.
     Name server is a singleton.
     """
+    # FIXME: lanciare le eccezioni appropriate per gli accessi al DB (app-starter)
     # TODO: inserire flag on/off sui file servers per controllo da root client (dfs).
     # TODO: inserire campo intero per la dimensione del file server (dfs).
     # TODO: implementare upload (dfs).
-    #       Occorre load balancing con K-least loaded.
+    # NOTE: Nell'upload occorre load balancing con K-least loaded (sulla base
+    #       dello spazio disponibile).
     # TODO: implementare download (dfs).
-    #       Mettere un controllo sul proprietario del file.
-    
+    # NOTE: Nel download, imporre un controllo sul proprietario del file.
     # CHECKDOC: NameServerService esegue atomicamente i metodi RPC?
     # CHECKDOC: NameServerService necessita di programmazione concorrente esplicita?
+    # IMPROVE: flag booleani di log-in per clients e file servers sono sufficienti,
+    #          o servono meccanismi aggiuntivi per spegnimenti che non li resettano?
     
     _instance   = None          # NameServerService active instance.
     _lock_file  = LOCKFILE_PATH # File used to lock the file server.
@@ -104,6 +107,7 @@ class NameServerService(rpyc.Service):
                     name TEXT,
                     size INTEGER,
                     checksum TEXT,
+                    owner TEXT,
                     primary_server_id INTEGER,
                     FOREIGN KEY (primary_server_id) REFERENCES file_servers (id),
                     FOREIGN KEY (owner) REFERENCES users (username)
@@ -159,10 +163,10 @@ class NameServerService(rpyc.Service):
             # Create the directory for the user.
             os.mkdir(directory)
             
-            return f"User '{username}' created successfully."
+            return {"status": True, "message": f"User '{username}' created successfully."}
         
         except sqlite3.IntegrityError:
-            return f"Error: user '{username}' already exists."
+            return {"status": False, "message": f"Error: user '{username}' already exists."}
         
         finally:
             conn.close()
@@ -355,7 +359,7 @@ class NameServerService(rpyc.Service):
             return f"Error deleting user."
     
     
-    def expose_check_root(self):
+    def exposed_check_root(self):
         """
         Checks whether there is a root user in the name server's database.
         Returns:

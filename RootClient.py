@@ -12,8 +12,7 @@ class RootClient(BaseClient):
     """Client class for root user. Root client is a singleton."""
     # TODO: implementare visualizzazione stato di tutti i files (dfs).
     # TODO: implementare accensione/spegnimento file servers (dfs).
-    
-    # CHECKDOC: la procedura di locking è sicura?
+    # IMPROVE: la procedura di locking è sicura?
     
     _instance   = None          # RootClient active instance.
     _lock_file  = LOCKFILE_PATH # File used to lock the root client.
@@ -78,14 +77,23 @@ class RootClient(BaseClient):
         
         self.connect()  # Connect to the name server.
         
-        # Check if the name server has a root user.
-        if not self.conn.root.check_root():
-            # If not, create one.
-            print("No root user was found. Creating one...")
-            username = input("Insert username: ")
-            password = input("Insert password: ")
-            
-            self.conn.root.create_user(username, password, is_root=True)
+        while True:
+            # Check if the name server has a root user.
+            if not self.conn.root.check_root():
+                # If not, create one.
+                print("No root user was found. Creating one...")
+                username = input("Insert username: ")
+                password = input("Insert password: ")
+                
+                result = self.conn.root.create_user(username, password, is_root=True)
+                
+                print(result["message"])
+                
+                # If the creation was successful, break the loop.
+                if result["status"]:
+                    break
+            else:
+                break
         
         # Login as root.
         while True:

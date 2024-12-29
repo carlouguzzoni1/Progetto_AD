@@ -5,6 +5,11 @@ import rpyc
 
 class BaseClient(ABC):
     """Abstract base class for client classes."""
+    # NOTE: le procedure di upload/download/display status di files dovrebbero
+    #       essere le stesse per regular e root clients.
+    # TODO: implementare visualizzazione stato dei propri files (dfs).
+    # TODO: implementare upload (dfs).
+    # TODO: implementare download (dfs).
     
     def __init__(self, host, port):
         """Initializes the client.
@@ -39,14 +44,18 @@ class BaseClient(ABC):
     
     
     def create_user(self):
-        """Creates a new regular user."""
+        """
+        Creates a new regular user.
+        Returns:
+            bool: True if the user was created successfully, False otherwise.
+        """
         
         username = input("Insert username: ")
         password = input("Insert password: ")
         result = self.conn.root.create_user(username, password, False)
-        print(result)
-        
-        
+        print(result["message"])
+    
+    
     def delete_user(self):
         """Deletes a regular user."""
         
