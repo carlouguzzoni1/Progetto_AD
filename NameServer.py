@@ -14,19 +14,21 @@ SERVER_PORT     = 18861
 
 class NameServerService(rpyc.Service):
     """
-    Represents the name server.
+    Represents the name server, which is the central node in the sym-DFS architecture.
+    Name server is a singleton.
     """
-    # TODO: finire documentazione della classe (app-starter).
+    # FIXME: lanciare le eccezioni appropriate per gli accessi al DB (app-starter)
     # TODO: inserire flag on/off sui file servers per controllo da root client (dfs).
     # TODO: inserire campo intero per la dimensione del file server (dfs).
     # TODO: implementare upload (dfs).
-    #       Occorre load balancing con K-least loaded.
+    # NOTE: Nell'upload occorre load balancing con K-least loaded (sulla base
+    #       dello spazio disponibile).
     # TODO: implementare download (dfs).
-    #       Mettere un controllo sul proprietario del file.
-    
-    
+    # NOTE: Nel download, imporre un controllo sul proprietario del file.
     # CHECKDOC: NameServerService esegue atomicamente i metodi RPC?
     # CHECKDOC: NameServerService necessita di programmazione concorrente esplicita?
+    # IMPROVE: flag booleani di log-in per clients e file servers sono sufficienti,
+    #          o servono meccanismi aggiuntivi per spegnimenti che non li resettano?
     
     _instance   = None          # NameServerService active instance.
     _lock_file  = LOCKFILE_PATH # File used to lock the file server.
@@ -105,6 +107,7 @@ class NameServerService(rpyc.Service):
                     name TEXT,
                     size INTEGER,
                     checksum TEXT,
+                    owner TEXT,
                     primary_server_id INTEGER,
                     FOREIGN KEY (primary_server_id) REFERENCES file_servers (id),
                     FOREIGN KEY (owner) REFERENCES users (username)
@@ -160,21 +163,22 @@ class NameServerService(rpyc.Service):
             # Create the directory for the user.
             os.mkdir(directory)
             
-            return f"User '{username}' created successfully."
+            return {"status": True, "message": f"User '{username}' created successfully."}
         
         except sqlite3.IntegrityError:
-            return f"Error: user '{username}' already exists."
+            return {"status": False, "message": f"Error: user '{username}' already exists."}
         
         finally:
             conn.close()
     
     
-    def exposed_authenticate(self, username, password):
+    def exposed_authenticate(self, username, password, is_root=False):
         """
         Authenticates a user.
         Args:
             username (str): The username of the user.
             password (str): The password of the user.
+            is_root (bool): Whether the user is a root user.
         Returns:
             dict:           A dictionary containing the result of the operation.
         """
@@ -186,7 +190,7 @@ class NameServerService(rpyc.Service):
         # Get user online status, hashed password and directory.
         try:
             cursor.execute("""
-                SELECT is_online, password_hash, directory
+                SELECT is_online, password_hash, directory, is_root
                 FROM users
                 WHERE username = ?
                 """,
@@ -196,6 +200,7 @@ class NameServerService(rpyc.Service):
         
         except sqlite3.DatabaseError as e:
             # Generic database error.
+            # SELECT operations should not throw weird exceptions, but we check in any case.
             print(e)
             report["status"]    = False
             report["message"]   = f"Error connecting to the database."
@@ -205,7 +210,7 @@ class NameServerService(rpyc.Service):
         
         # Check whether login can't be done.
         
-        # If user doesn't exist.
+        # Check user existence. User must exist.
         if result is None:
             report["status"]    = False
             report["message"]   = f"Error: user '{username}' not found."
@@ -213,7 +218,7 @@ class NameServerService(rpyc.Service):
             
             return report
         
-        # Check user online status.
+        # Check user online status. User must not be online.
         if result[0]:
             report["status"]    = False
             report["message"]   = f"Error: user '{username}' already logged in."
@@ -221,7 +226,7 @@ class NameServerService(rpyc.Service):
             
             return report
         
-        # Check user password validity.
+        # Check user password validity. Password must be correct.
         password_match = checkpw(password.encode('utf-8'), result[1])
         
         if not password_match:
@@ -231,7 +236,24 @@ class NameServerService(rpyc.Service):
             
             return report
         
-        # If login can be done.
+        # Check user root status. Can authenticate root user only when is_root is True.
+        # Root user trying to authenticate a non-root user.
+        if is_root and not result[3]:
+            report["status"]    = False
+            report["message"]   = f"Error: user '{username}' is not a root user."
+            conn.close()
+            
+            return report
+        
+        # Non-root user trying to authenticate a root user.
+        if not is_root and result[3]:
+            report["status"]    = False
+            report["message"]   = f"Error: user '{username}' is a root user."
+            conn.close()
+            
+            return report
+        
+        # If login can be done (checks passed successfully).
         report["status"]        = True
         report["message"]       = f"User '{username}' authenticated successfully."
         report["directory"]     = result[2]
@@ -335,7 +357,69 @@ class NameServerService(rpyc.Service):
             conn.close()
             
             return f"Error deleting user."
-
+    
+    
+    def exposed_check_root(self):
+        """
+        Checks whether there is a root user in the name server's database.
+        Returns:
+            bool: True if there is a root user, False otherwise.
+        """
+        
+        conn        = sqlite3.connect(self.db_path)
+        cursor      = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                SELECT is_root
+                FROM users
+                WHERE is_root = 1
+                """)
+            result  = cursor.fetchone()
+            
+            conn.close()
+            
+            return result is not None
+        
+        except sqlite3.DatabaseError as e:
+            # Generic database error.
+            print(e)
+            conn.close()
+            
+            return False
+    
+    
+    def exposed_logout(self, username):
+        """
+        Logs out a user.
+        Args:
+            username (str): The username of the user.
+        Returns:
+            str:            A message indicating the result of the operation.
+        """
+        
+        conn        = sqlite3.connect(self.db_path)
+        cursor      = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                UPDATE users
+                SET is_online = 0
+                WHERE username = ?
+                """,
+                (username,)
+                )
+            conn.commit()
+            conn.close()
+            
+            return f"User '{username}' logged out successfully."
+        
+        except sqlite3.DatabaseError as e:
+            # Generic database error.
+            print(e)
+            conn.close()
+            
+            return f"Error logging out user '{username}'."
 
 
 if __name__ == "__main__":

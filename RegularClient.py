@@ -1,26 +1,25 @@
+import sys
 from BaseClient import BaseClient
 
 
 
 class RegularClient(BaseClient):
     """Client class for regular users."""
-    # TODO: rimuovere i parametri di default nel metodo __init__ (app-starter).
-    # TODO: usare i parametri da riga di comando (app-starter).
-    # TODO: implementare visualizzazione stato dei propri files (dfs).
-    # TODO: implementare upload (dfs).
-    # TODO: implementare download (dfs).
     
-    def __init__(self, host="localhost", port=18861):
+    def __init__(self, host, port):
         """
         Initializes the client.
         Args:
             host (str): The hostname or IP address of the name server.
             port (int): The port number of the name server.
         """
+        
         super().__init__(host, port)
     
     
     def display_commands(self):
+        """Displays the available commands for the regular clients."""
+        
         print("""
         Welcome to sym-DFS Project Client.
         Commands:
@@ -38,7 +37,7 @@ class RegularClient(BaseClient):
         
         username    = input("Insert username: ")
         password    = input("Insert password: ")
-        result      = self.conn.root.authenticate(username, password)
+        result      = self.conn.root.authenticate(username, password, False)
         
         if result["status"]:
             self.user_is_logged     = True
@@ -52,6 +51,9 @@ class RegularClient(BaseClient):
         """Logs out the current user."""
         
         if self.user_is_logged:
+            # Update the user status in the name server's database.
+            self.conn.root.logout(self.logged_username)
+            # Reset the client's state.
             self.user_is_logged     = False
             self.logged_username    = None
             self.files_dir          = None
@@ -60,29 +62,8 @@ class RegularClient(BaseClient):
             print("No user is logged in.")
     
     
-    def create_user(self):
-        """Creates a new regular user."""
-        
-        username = input("Insert username: ")
-        password = input("Insert password: ")
-        result = self.conn.root.create_user(username, password, False)
-        print(result)
-    
-    
-    def delete_user(self):
-        """Deletes a regular user."""
-        
-        if not self.user_is_logged:
-            print("You must be logged in to delete a user.")
-        else:
-            username = input("Insert username: ")
-            password = input("Insert password: ")
-            result = self.conn.root.delete_user(username, password)
-            print(result)
-    
-    
     def main_prompt(self):
-        """Main prompt for regular users."""
+        """Main prompt for regular clients."""
         
         self.connect()              # Connect to the name server.
         self.display_commands()     # Display the available commands.
@@ -105,6 +86,11 @@ class RegularClient(BaseClient):
                     self.delete_user()
                 case "exit":
                     print("Exiting...")
+                    # If the user is logged in, log out before exiting.
+                    if self.user_is_logged:
+                        self.logout()
+                    # Close the connection.
+                    self.conn.close()
                     break
                 case "show-commands":
                     self.display_commands()
@@ -114,5 +100,6 @@ class RegularClient(BaseClient):
 
 
 if __name__ == "__main__":
-    client = RegularClient()
+    client = RegularClient(sys.argv[1], int(sys.argv[2]))
+    
     client.main_prompt()
