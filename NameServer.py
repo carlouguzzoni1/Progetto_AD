@@ -17,7 +17,10 @@ class NameServerService(rpyc.Service):
     Represents the name server, which is the central node in the sym-DFS architecture.
     Name server is a singleton.
     """
-    # FIXME: lanciare le eccezioni appropriate per gli accessi al DB (app-starter)
+    # FIXME: lanciare le eccezioni appropriate per gli accessi al DB (app-starter).
+    # FIXME: fare il return di dizionari (return {k: v}) nell'autenticazione utente
+    #        (app-starter).
+    # FIXME: alleggerire il try-catch nella cancellazione utente (app-starter).
     # TODO: inserire flag on/off sui file servers per controllo da root client (dfs).
     # TODO: inserire campo intero per la dimensione del file server (dfs).
     # TODO: implementare upload (dfs).
@@ -27,8 +30,10 @@ class NameServerService(rpyc.Service):
     # NOTE: Nel download, imporre un controllo sul proprietario del file.
     # CHECKDOC: NameServerService esegue atomicamente i metodi RPC?
     # CHECKDOC: NameServerService necessita di programmazione concorrente esplicita?
-    # IMPROVE: flag booleani di log-in per clients e file servers sono sufficienti,
-    #          o servono meccanismi aggiuntivi per spegnimenti che non li resettano?
+    # IMPROVE: dovrebbero essere i clients/file servers a creare localmente
+    #          la directory dedicata ai propri files.
+    # TODO: inserire meccanismo di heart-beat per spegnere logicamente file servers
+    #       ed utenti disconnessi con una procedura non regolare (dfs).
     
     _instance   = None          # NameServerService active instance.
     _lock_file  = LOCKFILE_PATH # File used to lock the file server.
@@ -93,7 +98,8 @@ class NameServerService(rpyc.Service):
             # Create file servers table.
             cursor.execute("""
                 CREATE TABLE file_servers (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT PRIMARY KEY,
+                    password_hash TEXT NOT NULL,
                     address TEXT UNIQUE,
                     port INTEGER,
                     last_heartbeat TIMESTAMP
@@ -104,12 +110,12 @@ class NameServerService(rpyc.Service):
             cursor.execute("""
                 CREATE TABLE files (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT,
+                    name TEXT UNIQUE,
                     size INTEGER,
                     checksum TEXT,
                     owner TEXT,
-                    primary_server_id INTEGER,
-                    FOREIGN KEY (primary_server_id) REFERENCES file_servers (id),
+                    primary_server TEXT,
+                    FOREIGN KEY (primary_server) REFERENCES file_servers (name),
                     FOREIGN KEY (owner) REFERENCES users (username)
                 );
             """)
@@ -118,10 +124,10 @@ class NameServerService(rpyc.Service):
             cursor.execute("""
                 CREATE TABLE replicas (
                     file_id INTEGER,
-                    server_id INTEGER,
+                    server TEXT,
                     FOREIGN KEY (file_id) REFERENCES files (id),
-                    FOREIGN KEY (server_id) REFERENCES file_servers (id),
-                    PRIMARY KEY (file_id, server_id)
+                    FOREIGN KEY (server) REFERENCES file_servers (name),
+                    PRIMARY KEY (file_id, server)
                 );
             """)
             
@@ -141,7 +147,8 @@ class NameServerService(rpyc.Service):
             password (str): The password of the new user.
             is_root (bool): Whether the new user is a root user.
         Returns:
-            str:            A message indicating the result of the operation.
+            dict:           A dictionary containing the result of the operation
+                            and a message.
         """
         
         conn            = sqlite3.connect(self.db_path)
@@ -172,7 +179,46 @@ class NameServerService(rpyc.Service):
             conn.close()
     
     
-    def exposed_authenticate(self, username, password, is_root=False):
+    def exposed_create_file_server(self, name, password, host, port):
+        """
+        Creates a new file server.
+        Args:
+            name (str):     The name of the new file server.
+            password (str): The password of the new file server.
+            host (str):     The host of the new file server.
+            port (int):     The port of the new file server.
+        Returns:
+            str:            A message indicating the result of the operation.
+        """
+        
+        conn            = sqlite3.connect(self.db_path)
+        cursor          = conn.cursor()
+        hashed_password = hashpw(password.encode('utf-8'), gensalt())
+        directory       = "./FS/" + name
+        
+        try:
+            # Create the file server.
+            cursor.execute("""
+                INSERT INTO file_servers (name, password_hash, address, port)
+                VALUES (?, ?, ?, ?)
+                """,
+                (name, hashed_password, host, port)
+                )
+            conn.commit()
+            
+            # Create the directory for the file server.
+            os.mkdir(directory)
+            
+            return f"File server '{name}' created successfully."
+        
+        except sqlite3.IntegrityError:
+            return f"Error: file server '{name}' already exists."
+        
+        finally:
+            conn.close()
+    
+    
+    def exposed_authenticate_user(self, username, password, is_root=False):
         """
         Authenticates a user.
         Args:
@@ -283,6 +329,104 @@ class NameServerService(rpyc.Service):
         return report
     
     
+    def exposed_authenticate_file_server(self, name, password):
+        """
+        Authenticates a file server.
+        Args:
+            name (str):     The name of the file server.
+            password (str): The password of the file server.
+        Returns:
+            dict:           A dictionary containing the result of the operation.
+        """
+        
+        conn    = sqlite3.connect(self.db_path)
+        cursor  = conn.cursor()
+        report  = dict()
+        
+        # Get file server online status, hashed password and directory.
+        try:
+            cursor.execute("""
+                SELECT is_online, password_hash, directory
+                FROM file_servers
+                WHERE name = ?
+                """,
+                (name,)
+                )
+            result  = cursor.fetchone()
+        
+        except sqlite3.DatabaseError as e:
+            # Generic database error.
+            # SELECT operations should not throw weird exceptions, but we check in any case.
+            print(e)
+            conn.close()
+            
+            return {
+                "status": False,
+                "message": f"Error connecting to the database."
+                }
+        
+        # Check whether login can't be done.
+        
+        # Check file server existence. File server must exist.
+        if result is None:
+            conn.close()
+            
+            return {
+                "status": False,
+                "message": f"Error: file server '{name}' not found."
+                }
+        
+        # Check file server online status. File server must not be online.
+        if result[0]:
+            conn.close()
+            
+            return {
+                "status": False,
+                "message": f"Error: file server '{name}' already logged in."
+                }
+        
+        # Check file server password validity. Password must be correct.
+        password_match = checkpw(password.encode('utf-8'), result[1])
+        
+        if not password_match:
+            conn.close()
+            
+            return {
+                "status": False,
+                "message": f"Error: wrong password for file server '{name}'."
+                }
+        
+        # If login can be done (checks passed successfully).
+        
+        # Try to update file server online status.
+        try:
+            cursor.execute("""
+                UPDATE file_servers
+                SET is_online = 1
+                WHERE name = ?
+                """,
+                (name,)
+                )
+            conn.commit()
+        
+        except sqlite3.DatabaseError as e:
+            # Generic database error.
+            print(e)
+            conn.close()
+            
+            return {
+                "status": False,
+                "message": f"Error connecting to the database."
+                }
+        
+        conn.close()
+        
+        return {
+            "status": True,
+            "message": f"File server '{name}' authenticated successfully."
+            }
+    
+    
     def exposed_delete_user(self, username, password):
         """
         Deletes a user.
@@ -295,7 +439,6 @@ class NameServerService(rpyc.Service):
         
         conn            = sqlite3.connect(self.db_path)
         cursor          = conn.cursor()
-        hashed_password = hashpw(password.encode('utf-8'), gensalt())
         
         try:
             # Get user root status, hashed password, online status and directory.
@@ -359,7 +502,7 @@ class NameServerService(rpyc.Service):
             return f"Error deleting user."
     
     
-    def exposed_check_root(self):
+    def exposed_exists_root_user(self):
         """
         Checks whether there is a root user in the name server's database.
         Returns:
@@ -420,6 +563,7 @@ class NameServerService(rpyc.Service):
             conn.close()
             
             return f"Error logging out user '{username}'."
+
 
 
 if __name__ == "__main__":
