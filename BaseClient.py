@@ -27,6 +27,7 @@ class BaseClient(ABC):
     
     def connect(self):
         """Establishes a connection to the name server."""
+        
         try:
             print("Connecting to the name server...")
             self.conn = rpyc.connect(self.ns_host, self.ns_port)

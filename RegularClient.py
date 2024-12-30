@@ -27,7 +27,7 @@ class RegularClient(BaseClient):
         logout              Log out
         create-user         Create a new user
         delete-user         Delete a user
-        exit                Exit
+        exit                Exit the program
         show-commands       Show commands
         """)
     
@@ -37,7 +37,7 @@ class RegularClient(BaseClient):
         
         username    = input("Insert username: ")
         password    = input("Insert password: ")
-        result      = self.conn.root.authenticate(username, password, False)
+        result      = self.conn.root.authenticate_user(username, password, False)
         
         if result["status"]:
             self.user_is_logged     = True
