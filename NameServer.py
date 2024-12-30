@@ -17,23 +17,21 @@ class NameServerService(rpyc.Service):
     Represents the name server, which is the central node in the sym-DFS architecture.
     Name server is a singleton.
     """    
-    # TODO: implementare upload (dfs).
+    # TODO: implementare upload lato-file server (dfs).
     # NOTE: Nell'upload occorre load balancing con K-least loaded (sulla base
     #       dello spazio disponibile).
-    # TODO: implementare download (dfs).
+    # TODO: implementare download lato-file server (dfs).
     # NOTE: Nel download, imporre un controllo sul proprietario del file.
     
-    # CHECKDOC: NameServerService esegue atomicamente i metodi RPC?
-    # CHECKDOC: NameServerService necessita di programmazione concorrente esplicita?
-    
-    # IMPROVE: dovrebbero essere i clients/file servers a creare localmente
-    #          la directory dedicata ai propri files.
-    # IMPROVE: è necessario salvare le directory sul database locale del  name server?
-    # NOTE: tutte le entità (escluso il name server) potrebbero avere una directory
-    #       predefinita per i propri files.
-    
     # TODO: inserire meccanismo di heart-beat per spegnere logicamente file servers
-    #       ed utenti disconnessi con una procedura non regolare (dfs).
+    #       ed utenti disconnessi tramite una procedura non regolare (dfs).
+    
+    # TODO: la cancellazione di un utente deve eliminare anche tutti i suoi files (dfs).
+    
+    # NOTE: sqlite3 è di default in modalità "serialized", ciò significa che si
+    #       possono eseguire più thread in simultanea senza restrizioni.
+    #       https://docs.python.org/3/library/sqlite3.html#sqlite3.threadsafety
+    #       Il progetto si può estendere per supportare accesso concorrente al DB.
     
     _instance   = None          # NameServerService active instance.
     _lock_file  = LOCKFILE_PATH # File used to lock the file server.
@@ -94,8 +92,7 @@ class NameServerService(rpyc.Service):
                         username TEXT PRIMARY KEY,
                         password_hash TEXT NOT NULL,
                         is_root BOOLEAN DEFAULT 0,
-                        is_online BOOLEAN DEFAULT 0,
-                        directory TEXT
+                        is_online BOOLEAN DEFAULT 0
                     );
                 """)
             except sqlite3.OperationalError as e:
@@ -111,7 +108,6 @@ class NameServerService(rpyc.Service):
                         port INTEGER NOT NULL,
                         is_online BOOLEAN DEFAULT 0,
                         size INTEGER,
-                        directory TEXT,
                         last_heartbeat TIMESTAMP,
                         UNIQUE (address, port)
                     );
@@ -171,18 +167,22 @@ class NameServerService(rpyc.Service):
         conn            = sqlite3.connect(self.db_path)
         cursor          = conn.cursor()
         hashed_password = hashpw(password.encode('utf-8'), gensalt())
-        directory       = "./CLI/" + username
         
         # Create the user.
         try:
             cursor.execute(
                 """
-                INSERT INTO users (username, password_hash, is_root, is_online, directory)
+                INSERT INTO users (username, password_hash, is_root, is_online)
                 VALUES (?, ?, ?, ?, ?)
                 """,
-                (username, hashed_password, is_root, False, directory)
+                (username, hashed_password, is_root, False)
             )
             conn.commit()
+            
+            return {
+            "status": True,
+            "message": f"User '{username}' created successfully."
+            }
         
         except sqlite3.IntegrityError as e:
             print(f"Error creating user '{username}':", e)
@@ -194,14 +194,6 @@ class NameServerService(rpyc.Service):
         
         finally:
             conn.close()
-        
-        # Create the directory for the user.
-        os.mkdir(directory)
-        
-        return {
-            "status": True,
-            "message": f"User '{username}' created successfully."
-            }
     
     
     def exposed_create_file_server(self, name, password, host, port, size):
@@ -220,7 +212,6 @@ class NameServerService(rpyc.Service):
         conn            = sqlite3.connect(self.db_path)
         cursor          = conn.cursor()
         hashed_password = hashpw(password.encode('utf-8'), gensalt())
-        directory       = "./FS/" + name
         
         # Verify conflicts with the ame server.
         if host == "localhost" or host == "127.0.0.1":
@@ -236,6 +227,8 @@ class NameServerService(rpyc.Service):
                 (name, hashed_password, host, port, size)
                 )
             conn.commit()
+            
+            return f"File server '{name}' created successfully."
         
         except sqlite3.IntegrityError as e:
             print(f"Error creating file server '{name}':", e)
@@ -244,11 +237,6 @@ class NameServerService(rpyc.Service):
         
         finally:
             conn.close()
-        
-        # Create the directory for the file server.
-        os.mkdir(directory)
-        
-        return f"File server '{name}' created successfully."
     
     
     def exposed_authenticate_user(self, username, password, is_root=False):
@@ -265,10 +253,10 @@ class NameServerService(rpyc.Service):
         conn    = sqlite3.connect(self.db_path)
         cursor  = conn.cursor()
         
-        # Get user online status, hashed password and directory.
+        # Get user online status, hashed password and root status.
         try:
             cursor.execute("""
-                SELECT is_online, password_hash, directory, is_root
+                SELECT is_online, password_hash, is_root
                 FROM users
                 WHERE username = ?
                 """,
@@ -318,7 +306,7 @@ class NameServerService(rpyc.Service):
         
         # Check user root status. Can authenticate root user only when is_root is True.
         # Root user trying to authenticate a non-root user.
-        if is_root and not result[3]:
+        if is_root and not result[2]:
             conn.close()
             
             return {
@@ -327,7 +315,7 @@ class NameServerService(rpyc.Service):
                 }
         
         # Non-root user trying to authenticate a root user.
-        if not is_root and result[3]:
+        if not is_root and result[2]:
             conn.close()
             
             return {
@@ -346,6 +334,11 @@ class NameServerService(rpyc.Service):
                 (username,)
                 )
             conn.commit()
+            
+            return {
+                "status": True,
+                "message": f"User '{username}' authenticated successfully."
+                }
         
         except sqlite3.OperationalError as e:
             print(f"Error updating record for user '{username}':", e)
@@ -357,12 +350,6 @@ class NameServerService(rpyc.Service):
         
         finally:
             conn.close()
-        
-        return {
-            "status": True,
-            "message": f"User '{username}' authenticated successfully.",
-            "directory": result[2]
-            }
     
     
     def exposed_authenticate_file_server(self, name, password):
@@ -378,10 +365,10 @@ class NameServerService(rpyc.Service):
         conn    = sqlite3.connect(self.db_path)
         cursor  = conn.cursor()
         
-        # Get file server online status, hashed password and directory.
+        # Get file server online status, hashed password, address and port.
         try:
             cursor.execute("""
-                SELECT is_online, password_hash, directory, address, port
+                SELECT is_online, password_hash, address, port
                 FROM file_servers
                 WHERE name = ?
                 """,
@@ -441,6 +428,13 @@ class NameServerService(rpyc.Service):
                 (name,)
                 )
             conn.commit()
+            
+            return {
+                "status": True,
+                "message": f"File server '{name}' authenticated successfully.",
+                "host": result[2],
+                "port": result[3]
+                }
         
         except sqlite3.OperationalError as e:
             print(f"Error updating record for file server '{name}':", e)
@@ -452,14 +446,6 @@ class NameServerService(rpyc.Service):
         
         finally:
             conn.close()
-        
-        return {
-            "status": True,
-            "message": f"File server '{name}' authenticated successfully.",
-            "directory": result[2],
-            "host": result[3],
-            "port": result[4]
-            }
     
     
     def exposed_delete_user(self, username, password):
@@ -475,10 +461,10 @@ class NameServerService(rpyc.Service):
         conn            = sqlite3.connect(self.db_path)
         cursor          = conn.cursor()
         
-        # Get user root status, hashed password, online status and directory.
+        # Get user root status, hashed password and online status.
         try:            
             cursor.execute("""
-                SELECT is_root, password_hash, is_online, directory
+                SELECT is_root, password_hash, is_online
                 FROM users
                 WHERE username = ?
                 """,
@@ -490,25 +476,28 @@ class NameServerService(rpyc.Service):
             print("Error selecting record for user:", e)
             conn.close()
             
-            return f"Error deleting user."
+            return {"status": False, "message": f"Error deleting user."}
         
         # Check user existence. User must exist.
         if result is None:
             conn.close()
             
-            return f"Error: user '{username}' not found."
+            return {"status": False, "message": f"Error: user '{username}' not found."}
         
         # Check user root status. User must not be root.
         if result[0]:
             conn.close()
             
-            return f"Error: you don't have the needed permissions to delete user '{username}'."
+            return {
+                "status": False,
+                "message": f"Error: you don't have the needed permissions to delete user '{username}'."
+                }
         
         # Check user online status. User must not be online.
         if result[2]:
             conn.close()
             
-            return f"Error: user '{username}' is currently logged in."
+            return {"status": False, "message": f"Error: user '{username}' is currently logged in."}
         
         # Check user password validity. Password must be correct.
         password_match = checkpw(password.encode('utf-8'), result[1])
@@ -516,10 +505,7 @@ class NameServerService(rpyc.Service):
         if not password_match:
             conn.close()
             
-            return f"Error: wrong password for user '{username}'."
-        
-        # Get user directory.
-        directory = result[3]
+            return {"status": False, "message": f"Error: wrong password for user '{username}'."}
         
         # Delete the user.
         try:
@@ -530,6 +516,8 @@ class NameServerService(rpyc.Service):
                 (username,)
                 )
             conn.commit()
+            
+            return {"status": True, "message": f"User '{username}' deleted successfully."}
         
         except sqlite3.OperationalError as e:
             print("Error deleting record for user:", e)
@@ -539,11 +527,6 @@ class NameServerService(rpyc.Service):
         
         finally:
             conn.close()
-        
-        # Delete the user directory.
-        shutil.rmtree(directory)
-        
-        return f"User '{username}' deleted successfully."
     
     
     def exposed_exists_root_user(self):

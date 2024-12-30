@@ -10,6 +10,12 @@ class BaseClient(ABC):
     # TODO: implementare download (dfs).
     # NOTE: le procedure di upload/download/display status di files dovrebbero
     #       essere le stesse per regular e root clients.
+    #       La visualizzazione dei files è una RPC con accesso al database del
+    #       name server. Upload/download sono RPC con accesso ad entrambi i servers.
+    
+    # TODO: decidere se applicare la cancellazione di un utente solo a livello
+    #       di files ed entry nel DB degli utenti, o anche nella propria directory
+    #       locale (dfs).
     
     def __init__(self, host, port):
         """Initializes the client.

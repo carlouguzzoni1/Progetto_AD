@@ -13,8 +13,14 @@ class RootClient(BaseClient):
     # TODO: implementare visualizzazione stato di tutti i files (dfs).
     # NOTE: questo si può fare semplicemente con una query SQL tramite RPC.
     # TODO: implementare accensione/spegnimento logico file servers (dfs).
+    # NOTE: implica interazione via-RPC con entrambi name e file servers.
     
-    # IMPROVE: la procedura di locking è sicura?
+    # FIXME: sostituire il while True con un while not nella procedura di creazione
+    #        di un root client (app-starter).
+    
+    # NOTE: la procedura di locking può essere implementata utilizzando una
+    #       risorsa comune, accessibile da tutti i client tramite URL. In questo
+    #       modo si supera il confine dello host locale.
     
     _instance   = None          # RootClient active instance.
     _lock_file  = LOCKFILE_PATH # File used to lock the root client.
@@ -106,13 +112,16 @@ class RootClient(BaseClient):
             result = self.conn.root.authenticate_user(username, password, True)
             
             if result["status"]:
-                print(result["message"])
                 self.user_is_logged     = True
                 self.logged_username    = username
-                self.files_dir          = result["directory"]
+                
+                # Check whether the root client actually has a local files directory.
+                if not os.path.exists(self.files_dir):
+                    os.mkdir(self.files_dir)   # Create the directory.
+                
                 break
-            else:
-                print(result["message"])
+            
+            print(result["message"])
     
     
     def main_prompt(self):
