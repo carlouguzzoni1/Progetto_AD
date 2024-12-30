@@ -21,7 +21,6 @@ class NameServerService(rpyc.Service):
     # FIXME: fare il return di dizionari (return {k: v}) nell'autenticazione utente
     #        (app-starter).
     # FIXME: alleggerire il try-catch nella cancellazione utente (app-starter).
-    # TODO: inserire flag on/off sui file servers per controllo da root client (dfs).
     # TODO: inserire campo intero per la dimensione del file server (dfs).
     # TODO: implementare upload (dfs).
     # NOTE: Nell'upload occorre load balancing con K-least loaded (sulla base
@@ -34,6 +33,9 @@ class NameServerService(rpyc.Service):
     #          la directory dedicata ai propri files.
     # TODO: inserire meccanismo di heart-beat per spegnere logicamente file servers
     #       ed utenti disconnessi con una procedura non regolare (dfs).
+    # IMPROVE: è necessario salvare le directory sul database locale del  name server?
+    # NOTE: tutte le entità (escluso il name server) potrebbero avere una directory
+    #       predefinita per i propri files.
     
     _instance   = None          # NameServerService active instance.
     _lock_file  = LOCKFILE_PATH # File used to lock the file server.
@@ -84,6 +86,9 @@ class NameServerService(rpyc.Service):
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
+            # Many NOT NULL constraints should be used because most data is mandatory.
+            # Sym-DFS software does still handle all mandatory data inherently.
+            
             # Create users table.
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS users (
@@ -100,8 +105,10 @@ class NameServerService(rpyc.Service):
                 CREATE TABLE file_servers (
                     name TEXT PRIMARY KEY,
                     password_hash TEXT NOT NULL,
-                    address TEXT UNIQUE,
-                    port INTEGER,
+                    address TEXT NOT NULL,
+                    port INTEGER NOT NULL,
+                    is_online BOOLEAN DEFAULT 0,
+                    size INTEGER,
                     last_heartbeat TIMESTAMP
                 );
             """)
@@ -110,7 +117,7 @@ class NameServerService(rpyc.Service):
             cursor.execute("""
                 CREATE TABLE files (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT UNIQUE,
+                    name TEXT UNIQUE NOT NULL,
                     size INTEGER,
                     checksum TEXT,
                     owner TEXT,
@@ -179,7 +186,7 @@ class NameServerService(rpyc.Service):
             conn.close()
     
     
-    def exposed_create_file_server(self, name, password, host, port):
+    def exposed_create_file_server(self, name, password, host, port, size):
         """
         Creates a new file server.
         Args:
@@ -187,6 +194,7 @@ class NameServerService(rpyc.Service):
             password (str): The password of the new file server.
             host (str):     The host of the new file server.
             port (int):     The port of the new file server.
+            size (int):     The size of the new file server.
         Returns:
             str:            A message indicating the result of the operation.
         """
@@ -200,9 +208,9 @@ class NameServerService(rpyc.Service):
             # Create the file server.
             cursor.execute("""
                 INSERT INTO file_servers (name, password_hash, address, port)
-                VALUES (?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?)
                 """,
-                (name, hashed_password, host, port)
+                (name, hashed_password, host, port, size)
                 )
             conn.commit()
             
@@ -211,7 +219,8 @@ class NameServerService(rpyc.Service):
             
             return f"File server '{name}' created successfully."
         
-        except sqlite3.IntegrityError:
+        except sqlite3.IntegrityError as e:
+            print(e)
             return f"Error: file server '{name}' already exists."
         
         finally:
