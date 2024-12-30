@@ -12,6 +12,7 @@ class RootClient(BaseClient):
     """Client class for root user. Root client is a singleton."""
     # TODO: implementare visualizzazione stato di tutti i files (dfs).
     # TODO: implementare accensione/spegnimento logico file servers (dfs).
+    
     # IMPROVE: la procedura di locking è sicura?
     
     _instance   = None          # RootClient active instance.

@@ -8,7 +8,7 @@ class FileServer(rpyc.Service):
     Implements the file server, which is a storage node in the sym-DFS
     architecture.
     """
-    # TODO: controllare la validità di host, port e size.
+    # TODO: controllare la validità di host, port e size (app-starter).
     
     def __init__(self, ns_host, ns_port):
         self.ns_host    = ns_host
@@ -51,7 +51,7 @@ class FileServer(rpyc.Service):
         password    = input("Insert password: ")
         host        = input("Insert server's host: ")
         port        = input("Insert server's port: ")
-        size        = input("Insert server's size: ")
+        size        = input("Insert server's size (in bytes): ")
         
         result      = self.conn.root.create_file_server(name, password, host, port, size)
         

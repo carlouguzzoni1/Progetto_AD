@@ -5,11 +5,11 @@ import rpyc
 
 class BaseClient(ABC):
     """Abstract base class for client classes."""
-    # NOTE: le procedure di upload/download/display status di files dovrebbero
-    #       essere le stesse per regular e root clients.
     # TODO: implementare visualizzazione stato dei propri files (dfs).
     # TODO: implementare upload (dfs).
     # TODO: implementare download (dfs).
+    # NOTE: le procedure di upload/download/display status di files dovrebbero
+    #       essere le stesse per regular e root clients.
     
     def __init__(self, host, port):
         """Initializes the client.

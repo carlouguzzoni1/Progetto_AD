@@ -21,21 +21,24 @@ class NameServerService(rpyc.Service):
     # FIXME: fare il return di dizionari (return {k: v}) nell'autenticazione utente
     #        (app-starter).
     # FIXME: alleggerire il try-catch nella cancellazione utente (app-starter).
-    # TODO: inserire campo intero per la dimensione del file server (dfs).
+    
     # TODO: implementare upload (dfs).
     # NOTE: Nell'upload occorre load balancing con K-least loaded (sulla base
     #       dello spazio disponibile).
     # TODO: implementare download (dfs).
     # NOTE: Nel download, imporre un controllo sul proprietario del file.
+    
     # CHECKDOC: NameServerService esegue atomicamente i metodi RPC?
     # CHECKDOC: NameServerService necessita di programmazione concorrente esplicita?
+    
     # IMPROVE: dovrebbero essere i clients/file servers a creare localmente
     #          la directory dedicata ai propri files.
-    # TODO: inserire meccanismo di heart-beat per spegnere logicamente file servers
-    #       ed utenti disconnessi con una procedura non regolare (dfs).
     # IMPROVE: è necessario salvare le directory sul database locale del  name server?
     # NOTE: tutte le entità (escluso il name server) potrebbero avere una directory
     #       predefinita per i propri files.
+    
+    # TODO: inserire meccanismo di heart-beat per spegnere logicamente file servers
+    #       ed utenti disconnessi con una procedura non regolare (dfs).
     
     _instance   = None          # NameServerService active instance.
     _lock_file  = LOCKFILE_PATH # File used to lock the file server.
@@ -109,6 +112,7 @@ class NameServerService(rpyc.Service):
                     port INTEGER NOT NULL,
                     is_online BOOLEAN DEFAULT 0,
                     size INTEGER,
+                    directory TEXT,
                     last_heartbeat TIMESTAMP
                 );
             """)
@@ -207,7 +211,7 @@ class NameServerService(rpyc.Service):
         try:
             # Create the file server.
             cursor.execute("""
-                INSERT INTO file_servers (name, password_hash, address, port)
+                INSERT INTO file_servers (name, password_hash, address, port, size)
                 VALUES (?, ?, ?, ?, ?)
                 """,
                 (name, hashed_password, host, port, size)
@@ -355,7 +359,7 @@ class NameServerService(rpyc.Service):
         # Get file server online status, hashed password and directory.
         try:
             cursor.execute("""
-                SELECT is_online, password_hash, directory
+                SELECT is_online, password_hash, directory, address, port
                 FROM file_servers
                 WHERE name = ?
                 """,
@@ -432,7 +436,10 @@ class NameServerService(rpyc.Service):
         
         return {
             "status": True,
-            "message": f"File server '{name}' authenticated successfully."
+            "message": f"File server '{name}' authenticated successfully.",
+            "directory": result[2],
+            "host": result[3],
+            "port": result[4]
             }
     
     
