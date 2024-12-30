@@ -11,6 +11,7 @@ LOCKFILE_PATH = "./NS/rootclient.lock"
 class RootClient(BaseClient):
     """Client class for root user. Root client is a singleton."""
     # TODO: implementare visualizzazione stato di tutti i files (dfs).
+    # NOTE: questo si può fare semplicemente con una query SQL tramite RPC.
     # TODO: implementare accensione/spegnimento logico file servers (dfs).
     
     # IMPROVE: la procedura di locking è sicura?
