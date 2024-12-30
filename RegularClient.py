@@ -1,3 +1,4 @@
+import os
 import sys
 from BaseClient import BaseClient
 
@@ -42,7 +43,11 @@ class RegularClient(BaseClient):
         if result["status"]:
             self.user_is_logged     = True
             self.logged_username    = username
-            self.files_dir          = result["directory"]
+            self.files_dir          = "./CLI/{}".format(username)
+            
+            # Check whether the client actually has a local files directory.
+            if not os.path.exists(self.files_dir):
+                os.mkdir(self.files_dir)   # Create the directory.
         
         print(result["message"])
     

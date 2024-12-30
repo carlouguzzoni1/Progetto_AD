@@ -1,3 +1,4 @@
+import os
 import sys
 import rpyc
 
@@ -25,6 +26,7 @@ class FileServer(rpyc.Service):
             print("Connecting to the name server...")
             self.conn = rpyc.connect(self.ns_host, self.ns_port)
             print("Connection established.")
+
         except Exception as e:
             print(f"Error connecting to the server: {e}")
             exit(1)
@@ -50,10 +52,15 @@ class FileServer(rpyc.Service):
         password    = input("Insert password: ")
         host        = input("Insert server's host: ")
         port        = input("Insert server's port: ")
+        size        = input("Insert server's size (in bytes): ")
         
-        result      = self.conn.root.create_file_server(name, password, host, port)
+        if size < 0:
+            print("Invalid size. Must be a positive integer.")
+            return
         
-        print(result["message"])
+        result      = self.conn.root.create_file_server(name, password, host, port, size)
+        
+        print(result)
     
     
     def login(self):
@@ -68,7 +75,11 @@ class FileServer(rpyc.Service):
         if result["status"]:
             self.host       = result["host"]
             self.port       = result["port"]
-            self.files_dir  = result["directory"]
+            self.files_dir  = "./FS/{}".format(name)
+            
+            # Check whether the file server actually has a local storage directory associated.
+            if not os.path.exists(self.files_dir):
+                os.mkdir(self.files_dir)   # Create the directory.
         
         print(result["message"])
         

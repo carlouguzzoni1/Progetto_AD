@@ -16,24 +16,22 @@ class NameServerService(rpyc.Service):
     """
     Represents the name server, which is the central node in the sym-DFS architecture.
     Name server is a singleton.
-    """
-    # FIXME: lanciare le eccezioni appropriate per gli accessi al DB (app-starter).
-    # FIXME: fare il return di dizionari (return {k: v}) nell'autenticazione utente
-    #        (app-starter).
-    # FIXME: alleggerire il try-catch nella cancellazione utente (app-starter).
-    # TODO: inserire flag on/off sui file servers per controllo da root client (dfs).
-    # TODO: inserire campo intero per la dimensione del file server (dfs).
-    # TODO: implementare upload (dfs).
+    """    
+    # TODO: implementare upload lato-file server (dfs).
     # NOTE: Nell'upload occorre load balancing con K-least loaded (sulla base
     #       dello spazio disponibile).
-    # TODO: implementare download (dfs).
+    # TODO: implementare download lato-file server (dfs).
     # NOTE: Nel download, imporre un controllo sul proprietario del file.
-    # CHECKDOC: NameServerService esegue atomicamente i metodi RPC?
-    # CHECKDOC: NameServerService necessita di programmazione concorrente esplicita?
-    # IMPROVE: dovrebbero essere i clients/file servers a creare localmente
-    #          la directory dedicata ai propri files.
+    
     # TODO: inserire meccanismo di heart-beat per spegnere logicamente file servers
-    #       ed utenti disconnessi con una procedura non regolare (dfs).
+    #       ed utenti disconnessi tramite una procedura non regolare (dfs).
+    
+    # TODO: la cancellazione di un utente deve eliminare anche tutti i suoi files (dfs).
+    
+    # NOTE: sqlite3 è di default in modalità "serialized", ciò significa che si
+    #       possono eseguire più thread in simultanea senza restrizioni.
+    #       https://docs.python.org/3/library/sqlite3.html#sqlite3.threadsafety
+    #       Il progetto si può estendere per supportare accesso concorrente al DB.
     
     _instance   = None          # NameServerService active instance.
     _lock_file  = LOCKFILE_PATH # File used to lock the file server.
@@ -84,58 +82,73 @@ class NameServerService(rpyc.Service):
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
+            # Many NOT NULL constraints should be used because most data is mandatory.
+            # Sym-DFS software does still handle all mandatory data inherently.
+            
             # Create users table.
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS users (
-                    username TEXT PRIMARY KEY,
-                    password_hash TEXT NOT NULL,
-                    is_root BOOLEAN DEFAULT 0,
-                    is_online BOOLEAN DEFAULT 0,
-                    directory TEXT
-                );
-            """)
+            try:
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS users (
+                        username TEXT PRIMARY KEY,
+                        password_hash TEXT NOT NULL,
+                        is_root BOOLEAN DEFAULT 0,
+                        is_online BOOLEAN DEFAULT 0
+                    );
+                """)
+            except sqlite3.OperationalError as e:
+                print("Error creating users table:", e)
             
             # Create file servers table.
-            cursor.execute("""
-                CREATE TABLE file_servers (
-                    name TEXT PRIMARY KEY,
-                    password_hash TEXT NOT NULL,
-                    address TEXT UNIQUE,
-                    port INTEGER,
-                    last_heartbeat TIMESTAMP
-                );
-            """)
+            try:
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS file_servers (
+                        name TEXT PRIMARY KEY,
+                        password_hash TEXT NOT NULL,
+                        address TEXT NOT NULL,
+                        port INTEGER NOT NULL,
+                        is_online BOOLEAN DEFAULT 0,
+                        size INTEGER,
+                        last_heartbeat TIMESTAMP,
+                        UNIQUE (address, port)
+                    );
+                """)
+            except sqlite3.OperationalError as e:
+                print("Error creating file servers table:", e)
             
             # Create files table.
-            cursor.execute("""
-                CREATE TABLE files (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT UNIQUE,
-                    size INTEGER,
-                    checksum TEXT,
-                    owner TEXT,
-                    primary_server TEXT,
-                    FOREIGN KEY (primary_server) REFERENCES file_servers (name),
-                    FOREIGN KEY (owner) REFERENCES users (username)
-                );
-            """)
+            try:
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS files (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name TEXT UNIQUE NOT NULL,
+                        size INTEGER,
+                        checksum TEXT,
+                        owner TEXT,
+                        primary_server TEXT,
+                        FOREIGN KEY (primary_server) REFERENCES file_servers (name),
+                        FOREIGN KEY (owner) REFERENCES users (username)
+                    );
+                """)
+            except sqlite3.OperationalError as e:
+                print("Error creating files table:", e)
             
             # Create replicas table.
-            cursor.execute("""
-                CREATE TABLE replicas (
-                    file_id INTEGER,
-                    server TEXT,
-                    FOREIGN KEY (file_id) REFERENCES files (id),
-                    FOREIGN KEY (server) REFERENCES file_servers (name),
-                    PRIMARY KEY (file_id, server)
-                );
-            """)
+            try:
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS replicas (
+                        file_id INTEGER,
+                        server TEXT,
+                        FOREIGN KEY (file_id) REFERENCES files (id),
+                        FOREIGN KEY (server) REFERENCES file_servers (name),
+                        PRIMARY KEY (file_id, server)
+                    );
+                """)
+            except sqlite3.OperationalError as e:
+                print("Error creating replicas table:", e)
             
-            conn.commit()
-            
-            # Inserire procedura di inizializzazione file servers qua.
-            
+            conn.commit()            
             conn.close()
+            
             print("Database created.")
     
     
@@ -154,32 +167,36 @@ class NameServerService(rpyc.Service):
         conn            = sqlite3.connect(self.db_path)
         cursor          = conn.cursor()
         hashed_password = hashpw(password.encode('utf-8'), gensalt())
-        directory       = "./CLI/" + username
         
+        # Create the user.
         try:
-            # Create the user.
             cursor.execute(
                 """
-                INSERT INTO users (username, password_hash, is_root, is_online, directory)
+                INSERT INTO users (username, password_hash, is_root, is_online)
                 VALUES (?, ?, ?, ?, ?)
                 """,
-                (username, hashed_password, is_root, False, directory)
+                (username, hashed_password, is_root, False)
             )
             conn.commit()
             
-            # Create the directory for the user.
-            os.mkdir(directory)
-            
-            return {"status": True, "message": f"User '{username}' created successfully."}
+            return {
+            "status": True,
+            "message": f"User '{username}' created successfully."
+            }
         
-        except sqlite3.IntegrityError:
-            return {"status": False, "message": f"Error: user '{username}' already exists."}
+        except sqlite3.IntegrityError as e:
+            print(f"Error creating user '{username}':", e)
+            
+            return {
+                "status": False,
+                "message": f"Error: user '{username}' already exists."
+                }
         
         finally:
             conn.close()
     
     
-    def exposed_create_file_server(self, name, password, host, port):
+    def exposed_create_file_server(self, name, password, host, port, size):
         """
         Creates a new file server.
         Args:
@@ -187,6 +204,7 @@ class NameServerService(rpyc.Service):
             password (str): The password of the new file server.
             host (str):     The host of the new file server.
             port (int):     The port of the new file server.
+            size (int):     The size of the new file server.
         Returns:
             str:            A message indicating the result of the operation.
         """
@@ -194,24 +212,27 @@ class NameServerService(rpyc.Service):
         conn            = sqlite3.connect(self.db_path)
         cursor          = conn.cursor()
         hashed_password = hashpw(password.encode('utf-8'), gensalt())
-        directory       = "./FS/" + name
         
+        # Verify conflicts with the ame server.
+        if host == "localhost" or host == "127.0.0.1":
+            if port == self.server_port:
+                return f"Error: File server port {port} conflicts with Name Server port."
+        
+        # Create the file server.
         try:
-            # Create the file server.
             cursor.execute("""
-                INSERT INTO file_servers (name, password_hash, address, port)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO file_servers (name, password_hash, address, port, size)
+                VALUES (?, ?, ?, ?, ?)
                 """,
-                (name, hashed_password, host, port)
+                (name, hashed_password, host, port, size)
                 )
             conn.commit()
             
-            # Create the directory for the file server.
-            os.mkdir(directory)
-            
             return f"File server '{name}' created successfully."
         
-        except sqlite3.IntegrityError:
+        except sqlite3.IntegrityError as e:
+            print(f"Error creating file server '{name}':", e)
+            
             return f"Error: file server '{name}' already exists."
         
         finally:
@@ -231,12 +252,11 @@ class NameServerService(rpyc.Service):
         
         conn    = sqlite3.connect(self.db_path)
         cursor  = conn.cursor()
-        report  = dict()
         
-        # Get user online status, hashed password and directory.
+        # Get user online status, hashed password and root status.
         try:
             cursor.execute("""
-                SELECT is_online, password_hash, directory, is_root
+                SELECT is_online, password_hash, is_root
                 FROM users
                 WHERE username = ?
                 """,
@@ -244,65 +264,65 @@ class NameServerService(rpyc.Service):
                 )
             result  = cursor.fetchone()
         
-        except sqlite3.DatabaseError as e:
-            # Generic database error.
-            # SELECT operations should not throw weird exceptions, but we check in any case.
-            print(e)
-            report["status"]    = False
-            report["message"]   = f"Error connecting to the database."
+        except sqlite3.OperationalError as e:
             conn.close()
+            print(f"Error selecting record for user '{username}':", e)
             
-            return report
+            return {
+                "status": False,
+                "message": f"Error authenticating user '{username}'."
+                }
         
         # Check whether login can't be done.
         
         # Check user existence. User must exist.
         if result is None:
-            report["status"]    = False
-            report["message"]   = f"Error: user '{username}' not found."
             conn.close()
             
-            return report
+            return {
+                "status": False,
+                "message": f"Error: user '{username}' not found."
+                }
         
         # Check user online status. User must not be online.
         if result[0]:
-            report["status"]    = False
-            report["message"]   = f"Error: user '{username}' already logged in."
             conn.close()
             
-            return report
+            return {
+                "status": False,
+                "message": f"Error: user '{username}' already logged in."
+                }
         
         # Check user password validity. Password must be correct.
         password_match = checkpw(password.encode('utf-8'), result[1])
         
         if not password_match:
-            report["status"]    = False
-            report["message"]   = f"Error: wrong password for user '{username}'."
             conn.close()
             
-            return report
+            return {
+                "status": False,
+                "message": f"Error: wrong password for user '{username}'."
+                }
         
         # Check user root status. Can authenticate root user only when is_root is True.
         # Root user trying to authenticate a non-root user.
-        if is_root and not result[3]:
-            report["status"]    = False
-            report["message"]   = f"Error: user '{username}' is not a root user."
+        if is_root and not result[2]:
             conn.close()
             
-            return report
+            return {
+                "status": False,
+                "message": f"Error: user '{username}' is not a root user."
+                }
         
         # Non-root user trying to authenticate a root user.
-        if not is_root and result[3]:
-            report["status"]    = False
-            report["message"]   = f"Error: user '{username}' is a root user."
+        if not is_root and result[2]:
             conn.close()
             
-            return report
+            return {
+                "status": False,
+                "message": f"Error: user '{username}' is a root user."}
         
         # If login can be done (checks passed successfully).
-        report["status"]        = True
-        report["message"]       = f"User '{username}' authenticated successfully."
-        report["directory"]     = result[2]
         
         # Try to update user online status.
         try:
@@ -314,19 +334,22 @@ class NameServerService(rpyc.Service):
                 (username,)
                 )
             conn.commit()
+            
+            return {
+                "status": True,
+                "message": f"User '{username}' authenticated successfully."
+                }
         
-        except sqlite3.DatabaseError as e:
-            # Generic database error.
-            print(e)
-            report["status"]    = False
-            report["message"]   = f"Error connecting to the database."
+        except sqlite3.OperationalError as e:
+            print(f"Error updating record for user '{username}':", e)
+            
+            return {
+                "status": False,
+                "message": f"Error authenticating user '{username}'."
+                }
+        
+        finally:
             conn.close()
-        
-            return report
-        
-        conn.close()
-        
-        return report
     
     
     def exposed_authenticate_file_server(self, name, password):
@@ -341,12 +364,11 @@ class NameServerService(rpyc.Service):
         
         conn    = sqlite3.connect(self.db_path)
         cursor  = conn.cursor()
-        report  = dict()
         
-        # Get file server online status, hashed password and directory.
+        # Get file server online status, hashed password, address and port.
         try:
             cursor.execute("""
-                SELECT is_online, password_hash, directory
+                SELECT is_online, password_hash, address, port
                 FROM file_servers
                 WHERE name = ?
                 """,
@@ -354,10 +376,8 @@ class NameServerService(rpyc.Service):
                 )
             result  = cursor.fetchone()
         
-        except sqlite3.DatabaseError as e:
-            # Generic database error.
-            # SELECT operations should not throw weird exceptions, but we check in any case.
-            print(e)
+        except sqlite3.OperationalError as e:
+            print(f"Error selecting record for file server '{name}':", e)
             conn.close()
             
             return {
@@ -408,23 +428,24 @@ class NameServerService(rpyc.Service):
                 (name,)
                 )
             conn.commit()
+            
+            return {
+                "status": True,
+                "message": f"File server '{name}' authenticated successfully.",
+                "host": result[2],
+                "port": result[3]
+                }
         
-        except sqlite3.DatabaseError as e:
-            # Generic database error.
-            print(e)
-            conn.close()
+        except sqlite3.OperationalError as e:
+            print(f"Error updating record for file server '{name}':", e)
             
             return {
                 "status": False,
                 "message": f"Error connecting to the database."
                 }
         
-        conn.close()
-        
-        return {
-            "status": True,
-            "message": f"File server '{name}' authenticated successfully."
-            }
+        finally:
+            conn.close()
     
     
     def exposed_delete_user(self, username, password):
@@ -440,46 +461,54 @@ class NameServerService(rpyc.Service):
         conn            = sqlite3.connect(self.db_path)
         cursor          = conn.cursor()
         
-        try:
-            # Get user root status, hashed password, online status and directory.
+        # Get user root status, hashed password and online status.
+        try:            
             cursor.execute("""
-                SELECT is_root, password_hash, is_online, directory
+                SELECT is_root, password_hash, is_online
                 FROM users
                 WHERE username = ?
                 """,
                 (username,)
                 )
             result = cursor.fetchone()
+        
+        except sqlite3.OperationalError as e:
+            print("Error selecting record for user:", e)
+            conn.close()
             
-            # Check user existence.
-            if result is None:
-                conn.close()
+            return {"status": False, "message": f"Error deleting user."}
+        
+        # Check user existence. User must exist.
+        if result is None:
+            conn.close()
             
-                return f"Error: user '{username}' not found."
+            return {"status": False, "message": f"Error: user '{username}' not found."}
+        
+        # Check user root status. User must not be root.
+        if result[0]:
+            conn.close()
             
-            # Check user root status.
-            if result[0]:
-                conn.close()
+            return {
+                "status": False,
+                "message": f"Error: you don't have the needed permissions to delete user '{username}'."
+                }
+        
+        # Check user online status. User must not be online.
+        if result[2]:
+            conn.close()
             
-                return f"Error: you don't have the needed permissions to delete user '{username}'."
+            return {"status": False, "message": f"Error: user '{username}' is currently logged in."}
+        
+        # Check user password validity. Password must be correct.
+        password_match = checkpw(password.encode('utf-8'), result[1])
+        
+        if not password_match:
+            conn.close()
             
-            # Check user online status.
-            if result[2]:
-                conn.close()
-            
-                return f"Error: user '{username}' is currently logged in."
-            
-            # Check user password validity.
-            password_match = checkpw(password.encode('utf-8'), result[1])
-            
-            if not password_match:
-                conn.close()
-                return f"Error: wrong password for user '{username}'."
-            
-            # Get user directory.
-            directory = result[3]
-            
-            # Delete the user.
+            return {"status": False, "message": f"Error: wrong password for user '{username}'."}
+        
+        # Delete the user.
+        try:
             cursor.execute(
                 """
                 DELETE FROM users WHERE username = ?
@@ -488,18 +517,16 @@ class NameServerService(rpyc.Service):
                 )
             conn.commit()
             
-            # Delete the user directory.
-            shutil.rmtree(directory)
-            conn.close()
-            
-            return f"User '{username}' deleted successfully."
+            return {"status": True, "message": f"User '{username}' deleted successfully."}
         
-        except sqlite3.DatabaseError as e:
-            # Generic database error.
-            print(e)
+        except sqlite3.OperationalError as e:
+            print("Error deleting record for user:", e)
             conn.close()
             
             return f"Error deleting user."
+        
+        finally:
+            conn.close()
     
     
     def exposed_exists_root_user(self):
@@ -524,9 +551,8 @@ class NameServerService(rpyc.Service):
             
             return result is not None
         
-        except sqlite3.DatabaseError as e:
-            # Generic database error.
-            print(e)
+        except sqlite3.OperationalError as e:
+            print("Error selecting record for user:", e)
             conn.close()
             
             return False
@@ -557,9 +583,8 @@ class NameServerService(rpyc.Service):
             
             return f"User '{username}' logged out successfully."
         
-        except sqlite3.DatabaseError as e:
-            # Generic database error.
-            print(e)
+        except sqlite3.OperationalError as e:
+            print("Error updating record for user:", e)
             conn.close()
             
             return f"Error logging out user '{username}'."
