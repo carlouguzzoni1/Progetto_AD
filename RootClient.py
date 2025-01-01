@@ -14,8 +14,6 @@ class RootClient(BaseClient):
     # TODO: implementare visualizzazione metadati di tutti i files attualemente
     #       nel database del name server (dfs).
     #       Formato: nome | dimensione | proprietario | checksum | server
-    # TODO: implementare accensione/spegnimento logico file servers per
-    #       manutenzione (dfs).
     # TODO: implementare visualizzazione dati di tutti i file servers (dfs).
     #       Formato: nome | stato | indirizzo | porta | dimensione | spazio libero
     

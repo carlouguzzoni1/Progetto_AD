@@ -16,18 +16,20 @@ class NameServerService(rpyc.Service):
     """
     Represents the name server, which is the central node in the sym-DFS architecture.
     Name server is a singleton.
-    """
-    # TODO: inserire meccanismo di heart-beat per spegnere logicamente file servers
-    #       ed utenti disconnessi tramite una procedura non regolare (dfs).
+    """    
+    # FIXME: la cancellazione di un utente deve eliminare anche tutti i suoi files
+    #        nel database del name server (dfs).
     
-    # TODO: la cancellazione di un utente deve eliminare anche tutti i suoi files
-    #       nel database del name server (dfs).
+    # FIXME: fare reworking dell'interazione client-server basato su token con
+    #        permessi.
     
-    # FIXME: trovare un meccanismo più sicuro per creazione/autenticazione di un
-    #       utente. Non deve essere possibile ad un regular client con accesso al
-    #       codice di creare/impersonare l'utente root (app-starter).
-    # FIXME: stesso che sopra, ma per l'aggiornamento dello stato di utenti/file
-    #       servers.
+    # FIXME: dict restituito da delete_user è inutile. Sostituire con messaggio.
+    
+    # NOTE: sebbene sia stata implementata la disconnessione logica sul database
+    #       in ogni client e file server, è possibile che il name server venga
+    #       disconnesso prima. In casi come questo, clients e file servers perman-
+    #       gono nel database come connessi.
+    # TODO: la soluzione più adatta è l'uso di un sistema di heart-beat.
     
     # NOTE: sqlite3 è di default in modalità "serialized", ciò significa che si
     #       possono eseguire più thread in simultanea senza restrizioni.
@@ -617,11 +619,18 @@ class NameServerService(rpyc.Service):
                 )
             result = cursor.fetchall()
             
-            return {
-                "status": True,
-                "message": f"Files for user '{username}' retrieved successfully.",
-                "files": result
-                }
+            # Check whether the user has any files.
+            if not result:
+                return {
+                    "status": False,
+                    "message": f"User '{username}' has no files."
+                    }
+            else:
+                return {
+                    "status": True,
+                    "message": f"Files for user '{username}' retrieved successfully.",
+                    "files": result
+                    }
         
         except sqlite3.OperationalError as e:
             print(f"Error selecting record for user:", e)

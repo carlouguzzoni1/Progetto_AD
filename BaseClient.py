@@ -9,8 +9,8 @@ from getpass import getpass
 
 class BaseClient(ABC):
     """Abstract base class for client classes."""
-    # TODO: implementare download lato-client (dfs).
-    # TODO: implementare cancellazione lato-client (dfs).
+    # TODO: implementare download (dfs).
+    # TODO: implementare cancellazione (dfs).
     
     # NOTE: le procedure di visualizzazione/upload/download/cancellazione di files
     #       dovrebbero essere le stesse per regular e root clients, in quanto si
@@ -21,7 +21,7 @@ class BaseClient(ABC):
     #       fatto la stessa persona, ma non si fanno supposizioni sulla località
     #       di tale host. Per questo motivo, il client non si accolla l'onere di
     #       cancellare la directory locale per tale utente, che pur non essendo
-    #       più registrato, potrà usufruire dei files che aveva scaricato.
+    #       più registrato, potrà ugualmente usufruire dei files che aveva scaricato.
     
     def __init__(self, host, port):
         """Initializes the client.
@@ -46,15 +46,16 @@ class BaseClient(ABC):
         print("Shutting down client...")
         
         # Update the client's status in the name server's database.
-        try:
-            self.conn.root.update_client_status(self.logged_username, False)
-        
-        except Exception as e:
-            print(f"Error updating client status: {e}")
-        
-        finally:
-            # Close the connection.
-            self.conn.close()
+        if self.user_is_logged:
+            try:
+                self.conn.root.update_client_status(self.logged_username, False)
+            
+            except Exception as e:
+                print(f"Error updating client status: {e}")
+            
+            finally:
+                # Close the connection.
+                self.conn.close()
     
     
     def connect(self):
@@ -99,7 +100,7 @@ class BaseClient(ABC):
             username = input("Insert username: ")
             password = getpass("Insert password: ")
             result = self.conn.root.delete_user(username, password)
-            print(result)
+            print(result["message"])
     
     
     @abstractmethod
@@ -192,5 +193,3 @@ class BaseClient(ABC):
         else:
             file_path = input("Insert file path: ")
             self.upload_file(file_path)
-    
-    
