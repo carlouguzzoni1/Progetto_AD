@@ -1,4 +1,5 @@
 import os
+import random
 import shutil
 import sqlite3
 import rpyc
@@ -16,17 +17,16 @@ class NameServerService(rpyc.Service):
     """
     Represents the name server, which is the central node in the sym-DFS architecture.
     Name server is a singleton.
-    """    
-    # TODO: implementare upload lato-file server (dfs).
-    # NOTE: Nell'upload occorre load balancing con K-least loaded (sulla base
-    #       dello spazio disponibile).
-    # TODO: implementare download lato-file server (dfs).
-    # NOTE: Nel download, imporre un controllo sul proprietario del file.
-    
+    """
     # TODO: inserire meccanismo di heart-beat per spegnere logicamente file servers
     #       ed utenti disconnessi tramite una procedura non regolare (dfs).
     
-    # TODO: la cancellazione di un utente deve eliminare anche tutti i suoi files (dfs).
+    # TODO: la cancellazione di un utente deve eliminare anche tutti i suoi files
+    #       nel database del name server (dfs).
+    
+    # FIXME: trovare un meccanismo più sicuro per creazione/autenticazione di un
+    #       utente. Non deve essere possibile ad un regular client con accesso al
+    #       codice di creare/impersonare l'utente root (app-starter).
     
     # NOTE: sqlite3 è di default in modalità "serialized", ciò significa che si
     #       possono eseguire più thread in simultanea senza restrizioni.
@@ -108,6 +108,7 @@ class NameServerService(rpyc.Service):
                         port INTEGER NOT NULL,
                         is_online BOOLEAN DEFAULT 0,
                         size INTEGER,
+                        free_space INTEGER,
                         last_heartbeat TIMESTAMP,
                         UNIQUE (address, port)
                     );
@@ -119,11 +120,11 @@ class NameServerService(rpyc.Service):
             try:
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS files (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        name TEXT UNIQUE NOT NULL,
+                        uuid TEXT PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        owner TEXT NOT NULL,
                         size INTEGER,
                         checksum TEXT,
-                        owner TEXT,
                         primary_server TEXT,
                         FOREIGN KEY (primary_server) REFERENCES file_servers (name),
                         FOREIGN KEY (owner) REFERENCES users (username)
@@ -136,11 +137,11 @@ class NameServerService(rpyc.Service):
             try:
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS replicas (
-                        file_id INTEGER,
+                        uuid INTEGER,
                         server TEXT,
-                        FOREIGN KEY (file_id) REFERENCES files (id),
+                        FOREIGN KEY (uuid) REFERENCES files (uuid),
                         FOREIGN KEY (server) REFERENCES file_servers (name),
-                        PRIMARY KEY (file_id, server)
+                        PRIMARY KEY (uuid, server)
                     );
                 """)
             except sqlite3.OperationalError as e:
@@ -173,7 +174,7 @@ class NameServerService(rpyc.Service):
             cursor.execute(
                 """
                 INSERT INTO users (username, password_hash, is_root, is_online)
-                VALUES (?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?)
                 """,
                 (username, hashed_password, is_root, False)
             )
@@ -588,6 +589,68 @@ class NameServerService(rpyc.Service):
             conn.close()
             
             return f"Error logging out user '{username}'."
+    
+    
+    def exposed_get_file_server(self, uuid, file_name, username, file_size, checksum):
+        """
+        Gets the best file server to store a file according to K-least loaded
+        policy.
+        Args:
+            uuid (str):         The uuid of the file server.
+            file_name (str):    The name of the file.
+            username (str):     The username of the user.
+            file_size (int):    The size of the file.
+            checksum (str):     The checksum of the file.
+        Returns:
+            dict:               A dictionary containing the file server information.
+        """
+        
+        K = 3
+        
+        # Get the K least loaded file servers.
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                SELECT address, port
+                FROM file_servers
+                WHERE is_online = 1
+                ORDER BY free_space DESC
+                LIMIT ?
+                """,
+                (K,)
+                )
+            result = cursor.fetchall()
+        
+        except sqlite3.OperationalError as e:
+            print("Error selecting record for file server:", e)
+            
+            return {
+                "status": False,
+                "message": f"Error getting best file server for file '{file_name}'."
+                }
+        
+        finally:
+            conn.close()
+        
+        # Check if there is any file server available.
+        if len(result) == 0:
+            return {
+                "status": False,
+                "message": f"No file server available for file '{file_name}'."
+            }
+        
+        # Select the best file server randomly.
+        random.shuffle(result)
+        best_file_server = result[0]
+        
+        return {
+            "status": True,
+            "message": f"Best file server found.",
+            "host": best_file_server[0],
+            "port": best_file_server[1]
+            }
 
 
 

@@ -54,7 +54,7 @@ class FileServer(rpyc.Service):
         port        = input("Insert server's port: ")
         size        = input("Insert server's size (in bytes): ")
         
-        if size < 0:
+        if int(size) < 0:
             print("Invalid size. Must be a positive integer.")
             return
         
@@ -110,6 +110,32 @@ class FileServer(rpyc.Service):
                     exit(0)
                 case _:
                     print("Unknown command.")
+    
+    
+    def exposed_store_file(self, file_name, file_data):
+        """
+        Stores a file on the file server.
+        Args:
+            filename (str): The name of the file.
+            data (bytes):   The content of the file.
+        Returns:
+            bool:           True if the file is stored successfully, False otherwise.
+        """
+        
+        # Create the new file path.
+        file_path = os.path.join(self.files_dir, file_name)
+        
+        # Try to store the file.
+        try:
+            with open(file_path, "wb") as file:
+                file.write(file_data)
+            
+            return {"status": True, "message": "File stored successfully."}
+        
+        except Exception as e:
+            print(f"Error storing file '{file_name}': {e}")
+            
+            return {"status": False, "message": "Error storing file."}
 
 
 
