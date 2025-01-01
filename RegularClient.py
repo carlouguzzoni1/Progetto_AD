@@ -1,6 +1,8 @@
+import getpass
 import os
 import sys
 from BaseClient import BaseClient
+from getpass import getpass
 
 
 
@@ -31,6 +33,7 @@ class RegularClient(BaseClient):
         logout              Log out
         create-user         Create a new user
         delete-user         Delete a user
+        list-files          List files of the user
         upload              Upload a file
         exit                Exit the program
         show-commands       Show commands
@@ -41,7 +44,7 @@ class RegularClient(BaseClient):
         """Authenticates a regular user."""
         
         username    = input("Insert username: ")
-        password    = input("Insert password: ")
+        password    = getpass("Insert password: ")
         result      = self.conn.root.authenticate_user(username, password, False)
         
         if result["status"]:
@@ -93,6 +96,8 @@ class RegularClient(BaseClient):
                     self.create_user()
                 case "delete-user":
                     self.delete_user()
+                case "list-files":
+                    self.list_files()
                 case "upload":
                     self.upload()
                 case "exit":

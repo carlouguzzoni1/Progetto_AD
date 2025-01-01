@@ -1,6 +1,7 @@
 import os
 import sys
 import rpyc
+from getpass import getpass
 
 
 
@@ -9,9 +10,6 @@ class FileServer(rpyc.Service):
     Implements the file server, which is a storage node in the sym-DFS
     architecture.
     """
-    # TODO: implementare oscuramento password file server (app-starter).
-    
-    # TODO: implementare meccanismo di spegnimento per interruzioni forzate.
     
     def __init__(self, ns_host, ns_port):
         self.ns_host    = ns_host
@@ -20,6 +18,27 @@ class FileServer(rpyc.Service):
         self.host       = None
         self.port       = None
         self.files_dir  = None
+        self.name       = None
+    
+    
+    def __del__(self):
+        """
+        Tries to update the file server's status in the name server's database
+        (to False) and close connection upon deletion.
+        """
+        
+        print("Shutting down file server...")
+        
+        # Update the file server's status in the name server's database.
+        try:
+            self.conn.root.update_file_server_status(self.name, False)
+        
+        except Exception as e:
+            print(f"Error updating file server status: {e}")
+        
+        finally:
+            # Close the connection.
+            self.conn.close()
     
     
     def connect(self):
@@ -52,7 +71,7 @@ class FileServer(rpyc.Service):
         
         print("Registering new file server...")
         name        = input("Insert server's name: ")
-        password    = input("Insert password: ")
+        password    = getpass("Insert password: ")
         host        = input("Insert server's host: ")
         port        = input("Insert server's port: ")
         size        = input("Insert server's size (in bytes): ")
@@ -71,7 +90,7 @@ class FileServer(rpyc.Service):
         
         print("Logging in...")
         name        = input("Insert server's name: ")
-        password    = input("Insert password: ")
+        password    = getpass("Insert password: ")
         
         result      = self.conn.root.authenticate_file_server(name, password)
         
@@ -79,6 +98,7 @@ class FileServer(rpyc.Service):
             self.host       = result["host"]
             self.port       = result["port"]
             self.files_dir  = "./FS/{}".format(name)
+            self.name       = name
             
             # Check whether the file server actually has a local storage directory associated.
             if not os.path.exists(self.files_dir):
@@ -97,7 +117,7 @@ class FileServer(rpyc.Service):
         
         while True:
             # Get user input.
-            command = input("(fs prompt)> ")
+            command = input("({})> ".format(self.name) if self.name else "(fs prompt)> ")
             
             # Execute the command.
             match command:

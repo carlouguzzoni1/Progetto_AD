@@ -1,6 +1,5 @@
 import os
 import random
-import shutil
 import sqlite3
 import rpyc
 from bcrypt import hashpw, gensalt, checkpw
@@ -24,11 +23,11 @@ class NameServerService(rpyc.Service):
     # TODO: la cancellazione di un utente deve eliminare anche tutti i suoi files
     #       nel database del name server (dfs).
     
-    # TODO: implementare meccanismo di spegnimento per interruzioni forzate.
-    
     # FIXME: trovare un meccanismo più sicuro per creazione/autenticazione di un
     #       utente. Non deve essere possibile ad un regular client con accesso al
     #       codice di creare/impersonare l'utente root (app-starter).
+    # FIXME: stesso che sopra, ma per l'aggiornamento dello stato di utenti/file
+    #       servers.
     
     # NOTE: sqlite3 è di default in modalità "serialized", ciò significa che si
     #       possono eseguire più thread in simultanea senza restrizioni.
@@ -66,6 +65,8 @@ class NameServerService(rpyc.Service):
     
     def __del__(self):
         """Removes the lock file when the name server is deleted."""
+        
+        print("Shutting down name server...")
         
         # Remove the lock file.
         if os.path.exists(self._lock_file):
@@ -593,6 +594,47 @@ class NameServerService(rpyc.Service):
             return f"Error logging out user '{username}'."
     
     
+    def exposed_get_user_files(self, username):
+        """
+        Gets the files owned by a user.
+        Args:
+            username (str): The username of the user.
+        Returns:
+            list:           A list of dictionaries containing the file information.
+        """
+        
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # Get the files owned by the user.
+        try:
+            cursor.execute("""
+                SELECT name, owner, size, checksum, primary_server
+                FROM files
+                WHERE owner = ?
+                """,
+                (username,)
+                )
+            result = cursor.fetchall()
+            
+            return {
+                "status": True,
+                "message": f"Files for user '{username}' retrieved successfully.",
+                "files": result
+                }
+        
+        except sqlite3.OperationalError as e:
+            print(f"Error selecting record for user:", e)
+            
+            return {
+                "status": False,
+                "message": f"Error retrieving files for user '{username}'."
+                }
+        
+        finally:
+            conn.close()
+    
+    
     def exposed_get_file_server(self, uuid, file_name, username, file_size, checksum):
         """
         Gets the best file server to store a file according to K-least loaded
@@ -725,7 +767,76 @@ class NameServerService(rpyc.Service):
             "host": best_file_server[1],
             "port": best_file_server[2]
             }
-
+    
+    
+    def exposed_update_file_server_status(self, name, status):
+        """
+        Turns off a file server.
+        Args:
+            name (str):     The name of the file server.
+            status (bool):  The new status of the file server.
+        Returns:
+            str:            A message indicating the result of the operation.
+        """
+        
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # Turn off the file server.
+        try:
+            cursor.execute("""
+                UPDATE file_servers
+                SET is_online = ?
+                WHERE name = ?
+                """,
+                (int(status), name)
+                )
+            conn.commit()
+            
+            return f"File server '{name}' turned off successfully."
+        
+        except sqlite3.OperationalError as e:
+            print(f"Error updating record for file server:", e)
+            
+            return f"Error turning off file server '{name}'."
+        
+        finally:
+            conn.close()
+    
+    
+    def exposed_update_client_status(self, username, status):
+        """
+        Updates the status of a client.
+        Args:
+            username (str): The username of the client.
+            status (bool):  The new status of the client.
+        Returns:
+            str:            A message indicating the result of the operation.
+        """
+        
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # Update the client's status.
+        try:
+            cursor.execute("""
+                UPDATE clients
+                SET is_online = ?
+                WHERE username = ?  
+                """,
+                (int(status), username)
+                )
+            conn.commit()
+            
+            return f"Client '{username}' updated successfully."
+        
+        except sqlite3.OperationalError as e:
+            print(f"Error updating record for client:", e)
+            
+            return f"Error updating client '{username}'."
+        
+        finally:
+            conn.close()
 
 
 if __name__ == "__main__":

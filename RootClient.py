@@ -1,6 +1,7 @@
 import sys
 from BaseClient import BaseClient
 import os
+from getpass import getpass
 
 
 
@@ -79,7 +80,9 @@ class RootClient(BaseClient):
         Commands:
         create-user         Create a new user
         delete-user         Delete a user
+        list-files          List files of the root user
         upload              Upload a file
+        turn-off-fs         Logically turn off a file server (maintenance)
         exit                Exit the program
         show-commands       Show commands
         """)
@@ -100,7 +103,7 @@ class RootClient(BaseClient):
                 # If not, create one.
                 print("No root user was found. Creating one...")
                 username = input("Insert username: ")
-                password = input("Insert password: ")
+                password = getpass("Insert password: ")
                 
                 result = self.conn.root.create_user(username, password, is_root=True)
                 
@@ -116,13 +119,14 @@ class RootClient(BaseClient):
         while True:
             print("Login as root...")
             username = input("Insert username: ")
-            password = input("Insert password: ")
+            password = getpass("Insert password: ")
             
             result = self.conn.root.authenticate_user(username, password, True)
             
             if result["status"]:
                 self.user_is_logged     = True
                 self.logged_username    = username
+                self.files_dir          = "./CLI/{}".format(username)
                 
                 # Check whether the root client actually has a local files directory.
                 if not os.path.exists(self.files_dir):
@@ -150,6 +154,8 @@ class RootClient(BaseClient):
                     self.create_user()
                 case "delete-user":
                     self.delete_user()
+                case "list-files":
+                    self.list_files()
                 case "upload":
                     self.upload_file()
                 case "exit":

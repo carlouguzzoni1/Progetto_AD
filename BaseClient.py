@@ -1,17 +1,16 @@
 from abc import ABC, abstractmethod
 import os
 import rpyc
+from tabulate import tabulate
 import utils
+from getpass import getpass
 
 
 
 class BaseClient(ABC):
     """Abstract base class for client classes."""
-    # TODO: implementare visualizzazione stato dei propri files (dfs).
     # TODO: implementare download lato-client (dfs).
     # TODO: implementare cancellazione lato-client (dfs).
-    
-    # TODO: implementare oscuramento password utente (app-starter).
     
     # NOTE: le procedure di visualizzazione/upload/download/cancellazione di files
     #       dovrebbero essere le stesse per regular e root clients, in quanto si
@@ -30,12 +29,32 @@ class BaseClient(ABC):
             host (str): The hostname or IP address of the name server.
             port (int): The port number of the name server.
         """
+        
         self.ns_host            = host
         self.ns_port            = port
         self.conn               = None
         self.user_is_logged     = False
         self.logged_username    = None
         self.files_dir          = None
+    
+    
+    def __del__(self):
+        """Tries to update the client's status in the name server's database
+        (to False) and close connection upon deletion.
+        """
+        
+        print("Shutting down client...")
+        
+        # Update the client's status in the name server's database.
+        try:
+            self.conn.root.update_client_status(self.logged_username, False)
+        
+        except Exception as e:
+            print(f"Error updating client status: {e}")
+        
+        finally:
+            # Close the connection.
+            self.conn.close()
     
     
     def connect(self):
@@ -66,7 +85,7 @@ class BaseClient(ABC):
         """
         
         username = input("Insert username: ")
-        password = input("Insert password: ")
+        password = getpass("Insert password: ")
         result = self.conn.root.create_user(username, password, False)
         print(result["message"])
     
@@ -78,7 +97,7 @@ class BaseClient(ABC):
             print("You must be logged in to delete a user.")
         else:
             username = input("Insert username: ")
-            password = input("Insert password: ")
+            password = getpass("Insert password: ")
             result = self.conn.root.delete_user(username, password)
             print(result)
     
@@ -88,6 +107,38 @@ class BaseClient(ABC):
         """Displays the main prompt for the clients."""
         
         pass
+    
+    
+    def list_files(self):
+        """Lists the user's files in the DFS."""
+        
+        if not self.user_is_logged:
+            print("You must be logged in to list files.")
+        else:
+            result = self.conn.root.get_user_files(self.logged_username)
+            
+            print(result["message"])
+            
+            # If the operation was successful, print the result.
+            if result["status"]:
+                # Convert the result to a list of dictionaries.
+                headers = ["File", "Owner", "Size", "Checksum", "Primary Server"]
+                result["files"]  = [dict(zip(headers, row)) for row in result["files"]]
+                
+                MAX_CHECKSUM_LEN = 15
+                
+                result["files"] = [
+                    {
+                        "File"          : f["File"],
+                        "Owner"         : f["Owner"],
+                        "Size"          : f["Size"],
+                        "Checksum"      : utils.truncate(f["Checksum"], MAX_CHECKSUM_LEN),
+                        "Primary Server": f["Primary Server"]
+                    }
+                    for f in result["files"]
+                ]
+                
+                print(tabulate(result["files"], headers="keys"))
     
     
     def upload_file(self, file_path):
@@ -141,3 +192,5 @@ class BaseClient(ABC):
         else:
             file_path = input("Insert file path: ")
             self.upload_file(file_path)
+    
+    
