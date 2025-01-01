@@ -1,4 +1,4 @@
-# Progetto_AD
+# Progetto_AD (Algoritmi Distribuiti)
 Progetto Algoritmi Distribuiti - Studio di file system distribuito (FSD) realizzato in Python (RPC).
 
-Commit di prova.
+TODO: generare un file system predefinito ed uno script che cancelli quello esistente, rimpiazzandolo con il primo.

@@ -10,13 +10,21 @@ LOCKFILE_PATH = "./NS/rootclient.lock"
 
 class RootClient(BaseClient):
     """Client class for root user. Root client is a singleton."""
-    # TODO: implementare visualizzazione stato di tutti i files (dfs).
-    # NOTE: questo si può fare semplicemente con una query SQL tramite RPC.
-    # TODO: implementare accensione/spegnimento logico file servers (dfs).
-    # NOTE: implica interazione via-RPC con entrambi name e file servers.
+    # TODO: implementare visualizzazione metadati di tutti i files attualemente
+    #       nel database del name server (dfs).
+    #       Formato: nome | dimensione | proprietario | checksum | server
+    # TODO: implementare accensione/spegnimento logico file servers per
+    #       manutenzione (dfs).
+    # TODO: implementare visualizzazione dati di tutti i file servers (dfs).
+    #       Formato: nome | stato | indirizzo | porta | dimensione | spazio libero
     
     # FIXME: sostituire il while True con un while not nella procedura di creazione
     #        di un root client (app-starter).
+    
+    # NOTE: il RootClient è pensato come un utente con privilegi speciali, che
+    #       interagisce con le altre entità in caso di manutenzione del sistema.
+    #       Non gli è consentito di applicare le funzioni di base al di fuori
+    #       dello scopo per il quale sono state definite, per motivi di privacy.
     
     # NOTE: la procedura di locking può essere implementata utilizzando una
     #       risorsa comune, accessibile da tutti i client tramite URL. In questo
@@ -141,6 +149,8 @@ class RootClient(BaseClient):
                     self.create_user()
                 case "delete-user":
                     self.delete_user()
+                case "upload":
+                    self.upload_file()
                 case "exit":
                     print("Exiting...")
                     # Update the user status in the name server's database.

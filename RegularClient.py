@@ -6,6 +6,9 @@ from BaseClient import BaseClient
 
 class RegularClient(BaseClient):
     """Client class for regular users."""
+    # NOTE: il regular client è pensato per essere un utente generico del DFS.
+    #       Le funzionalità sono pertanto quelle di base, definite nella classe
+    #       BaseClient, più i metodi che consenstono l'interazione con l'utente.
     
     def __init__(self, host, port):
         """
@@ -28,6 +31,7 @@ class RegularClient(BaseClient):
         logout              Log out
         create-user         Create a new user
         delete-user         Delete a user
+        upload              Upload a file
         exit                Exit the program
         show-commands       Show commands
         """)
@@ -89,6 +93,8 @@ class RegularClient(BaseClient):
                     self.create_user()
                 case "delete-user":
                     self.delete_user()
+                case "upload":
+                    self.upload()
                 case "exit":
                     print("Exiting...")
                     # If the user is logged in, log out before exiting.
