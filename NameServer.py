@@ -613,7 +613,7 @@ class NameServerService(rpyc.Service):
         
         try:
             cursor.execute("""
-                SELECT address, port
+                SELECT name, address, port, free_space
                 FROM file_servers
                 WHERE is_online = 1
                 ORDER BY free_space DESC
@@ -643,13 +643,85 @@ class NameServerService(rpyc.Service):
         
         # Select the best file server randomly.
         random.shuffle(result)
-        best_file_server = result[0]
+        best_file_server = None
+        
+        # Iterate through the file servers to find the first one with enough free space.
+        for file_server in result:
+            if file_server[3] >= file_size:
+                best_file_server = file_server
+                break
+        
+        # If no file server has enough free space, return an error message.
+        if best_file_server is None:
+            return {
+                "status": False,
+                "message": f"No file server has enough free space for file '{file_name}'."
+            }
+        
+        # Update the file server's free space.
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                UPDATE file_servers
+                SET free_space = ?
+                WHERE name = ?
+                """,
+                (best_file_server[3] - file_size, best_file_server[0])
+                )
+            conn.commit()
+        
+        except sqlite3.OperationalError as e:
+            print(f"Error updating record for file server {best_file_server[0]}:", e)
+        
+        finally:
+            conn.close()
+        
+        # Create new entry into the files table.
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                INSERT INTO files (uuid, name, owner, size, checksum, primary_server)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (uuid, file_name, username, file_size, checksum, best_file_server[0])
+                )
+            conn.commit()
+        
+        except sqlite3.OperationalError as e:
+            print(f"Error inserting record for file:", e)
+        
+        finally:
+            conn.close()
+        
+        # Create a new entry into the replicas table.
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                INSERT INTO replicas (uuid, server)
+                VALUES (?, ?)
+                """,
+                (uuid, best_file_server[0])
+                )
+            conn.commit()
+        
+        except sqlite3.OperationalError as e:
+            print(f"Error inserting record for replica of file:", e)
+        
+        finally:
+            conn.close()
+        
         
         return {
             "status": True,
             "message": f"Best file server found.",
-            "host": best_file_server[0],
-            "port": best_file_server[1]
+            "host": best_file_server[1],
+            "port": best_file_server[2]
             }
 
 

@@ -8,7 +8,6 @@ import utils
 class BaseClient(ABC):
     """Abstract base class for client classes."""
     # TODO: implementare visualizzazione stato dei propri files (dfs).
-    # TODO: implementare upload lato-client(dfs).
     # TODO: implementare download lato-client (dfs).
     # TODO: implementare cancellazione lato-client (dfs).
     

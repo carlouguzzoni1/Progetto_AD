@@ -79,6 +79,7 @@ class RootClient(BaseClient):
         Commands:
         create-user         Create a new user
         delete-user         Delete a user
+        upload              Upload a file
         exit                Exit the program
         show-commands       Show commands
         """)
