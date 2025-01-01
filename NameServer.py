@@ -1,6 +1,5 @@
 import os
 import random
-import shutil
 import sqlite3
 import rpyc
 from bcrypt import hashpw, gensalt, checkpw
@@ -27,6 +26,8 @@ class NameServerService(rpyc.Service):
     # FIXME: trovare un meccanismo più sicuro per creazione/autenticazione di un
     #       utente. Non deve essere possibile ad un regular client con accesso al
     #       codice di creare/impersonare l'utente root (app-starter).
+    # FIXME: stesso che sopra, ma per l'aggiornamento dello stato di utenti/file
+    #       servers.
     
     # NOTE: sqlite3 è di default in modalità "serialized", ciò significa che si
     #       possono eseguire più thread in simultanea senza restrizioni.
@@ -64,6 +65,8 @@ class NameServerService(rpyc.Service):
     
     def __del__(self):
         """Removes the lock file when the name server is deleted."""
+        
+        print("Shutting down name server...")
         
         # Remove the lock file.
         if os.path.exists(self._lock_file):
@@ -222,10 +225,10 @@ class NameServerService(rpyc.Service):
         # Create the file server.
         try:
             cursor.execute("""
-                INSERT INTO file_servers (name, password_hash, address, port, size)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO file_servers (name, password_hash, address, port, size, free_space)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (name, hashed_password, host, port, size)
+                (name, hashed_password, host, port, size, size)
                 )
             conn.commit()
             
@@ -591,6 +594,47 @@ class NameServerService(rpyc.Service):
             return f"Error logging out user '{username}'."
     
     
+    def exposed_get_user_files(self, username):
+        """
+        Gets the files owned by a user.
+        Args:
+            username (str): The username of the user.
+        Returns:
+            list:           A list of dictionaries containing the file information.
+        """
+        
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # Get the files owned by the user.
+        try:
+            cursor.execute("""
+                SELECT name, owner, size, checksum, primary_server
+                FROM files
+                WHERE owner = ?
+                """,
+                (username,)
+                )
+            result = cursor.fetchall()
+            
+            return {
+                "status": True,
+                "message": f"Files for user '{username}' retrieved successfully.",
+                "files": result
+                }
+        
+        except sqlite3.OperationalError as e:
+            print(f"Error selecting record for user:", e)
+            
+            return {
+                "status": False,
+                "message": f"Error retrieving files for user '{username}'."
+                }
+        
+        finally:
+            conn.close()
+    
+    
     def exposed_get_file_server(self, uuid, file_name, username, file_size, checksum):
         """
         Gets the best file server to store a file according to K-least loaded
@@ -613,7 +657,7 @@ class NameServerService(rpyc.Service):
         
         try:
             cursor.execute("""
-                SELECT address, port
+                SELECT name, address, port, free_space
                 FROM file_servers
                 WHERE is_online = 1
                 ORDER BY free_space DESC
@@ -643,15 +687,156 @@ class NameServerService(rpyc.Service):
         
         # Select the best file server randomly.
         random.shuffle(result)
-        best_file_server = result[0]
+        best_file_server = None
+        
+        # Iterate through the file servers to find the first one with enough free space.
+        for file_server in result:
+            if int(file_server[3]) >= file_size:
+                best_file_server = file_server
+                break
+        
+        # If no file server has enough free space, return an error message.
+        if best_file_server is None:
+            return {
+                "status": False,
+                "message": f"No file server has enough free space for file '{file_name}'."
+            }
+        
+        # Update the file server's free space.
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                UPDATE file_servers
+                SET free_space = ?
+                WHERE name = ?
+                """,
+                (int(best_file_server[3]) - file_size, best_file_server[0])
+                )
+            conn.commit()
+        
+        except sqlite3.OperationalError as e:
+            print(f"Error updating record for file server {best_file_server[0]}:", e)
+        
+        finally:
+            conn.close()
+        
+        # Create new entry into the files table.
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                INSERT INTO files (uuid, name, owner, size, checksum, primary_server)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (uuid, file_name, username, file_size, checksum, best_file_server[0])
+                )
+            conn.commit()
+        
+        except sqlite3.OperationalError as e:
+            print(f"Error inserting record for file:", e)
+        
+        finally:
+            conn.close()
+        
+        # Create a new entry into the replicas table.
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                INSERT INTO replicas (uuid, server)
+                VALUES (?, ?)
+                """,
+                (uuid, best_file_server[0])
+                )
+            conn.commit()
+        
+        except sqlite3.OperationalError as e:
+            print(f"Error inserting record for replica of file:", e)
+        
+        finally:
+            conn.close()
+        
         
         return {
             "status": True,
             "message": f"Best file server found.",
-            "host": best_file_server[0],
-            "port": best_file_server[1]
+            "host": best_file_server[1],
+            "port": best_file_server[2]
             }
-
+    
+    
+    def exposed_update_file_server_status(self, name, status):
+        """
+        Turns off a file server.
+        Args:
+            name (str):     The name of the file server.
+            status (bool):  The new status of the file server.
+        Returns:
+            str:            A message indicating the result of the operation.
+        """
+        
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # Turn off the file server.
+        try:
+            cursor.execute("""
+                UPDATE file_servers
+                SET is_online = ?
+                WHERE name = ?
+                """,
+                (int(status), name)
+                )
+            conn.commit()
+            
+            return f"File server '{name}' turned off successfully."
+        
+        except sqlite3.OperationalError as e:
+            print(f"Error updating record for file server:", e)
+            
+            return f"Error turning off file server '{name}'."
+        
+        finally:
+            conn.close()
+    
+    
+    def exposed_update_client_status(self, username, status):
+        """
+        Updates the status of a client.
+        Args:
+            username (str): The username of the client.
+            status (bool):  The new status of the client.
+        Returns:
+            str:            A message indicating the result of the operation.
+        """
+        
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # Update the client's status.
+        try:
+            cursor.execute("""
+                UPDATE clients
+                SET is_online = ?
+                WHERE username = ?  
+                """,
+                (int(status), username)
+                )
+            conn.commit()
+            
+            return f"Client '{username}' updated successfully."
+        
+        except sqlite3.OperationalError as e:
+            print(f"Error updating record for client:", e)
+            
+            return f"Error updating client '{username}'."
+        
+        finally:
+            conn.close()
 
 
 if __name__ == "__main__":

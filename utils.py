@@ -29,3 +29,16 @@ def generate_uuid():
     """
     
     return str(uuid.uuid4())
+
+
+def truncate(value, max_length):
+    """
+    Truncates a string to a maximum length.
+    Args:
+        value (str):        The string to truncate.
+        max_length (int):   The maximum length of the string.
+    Returns:
+        str:                The truncated string.
+    """
+    
+    return value[:max_length] + "..." if len(value) > max_length else value
