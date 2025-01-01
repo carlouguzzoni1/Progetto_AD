@@ -24,6 +24,8 @@ class NameServerService(rpyc.Service):
     # TODO: la cancellazione di un utente deve eliminare anche tutti i suoi files
     #       nel database del name server (dfs).
     
+    # TODO: implementare meccanismo di spegnimento per interruzioni forzate.
+    
     # FIXME: trovare un meccanismo più sicuro per creazione/autenticazione di un
     #       utente. Non deve essere possibile ad un regular client con accesso al
     #       codice di creare/impersonare l'utente root (app-starter).
@@ -222,10 +224,10 @@ class NameServerService(rpyc.Service):
         # Create the file server.
         try:
             cursor.execute("""
-                INSERT INTO file_servers (name, password_hash, address, port, size)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO file_servers (name, password_hash, address, port, size, free_space)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (name, hashed_password, host, port, size)
+                (name, hashed_password, host, port, size, size)
                 )
             conn.commit()
             
@@ -647,7 +649,7 @@ class NameServerService(rpyc.Service):
         
         # Iterate through the file servers to find the first one with enough free space.
         for file_server in result:
-            if file_server[3] >= file_size:
+            if int(file_server[3]) >= file_size:
                 best_file_server = file_server
                 break
         
@@ -668,7 +670,7 @@ class NameServerService(rpyc.Service):
                 SET free_space = ?
                 WHERE name = ?
                 """,
-                (best_file_server[3] - file_size, best_file_server[0])
+                (int(best_file_server[3]) - file_size, best_file_server[0])
                 )
             conn.commit()
         

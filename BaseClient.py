@@ -11,6 +11,8 @@ class BaseClient(ABC):
     # TODO: implementare download lato-client (dfs).
     # TODO: implementare cancellazione lato-client (dfs).
     
+    # TODO: implementare oscuramento password utente (app-starter).
+    
     # NOTE: le procedure di visualizzazione/upload/download/cancellazione di files
     #       dovrebbero essere le stesse per regular e root clients, in quanto si
     #       tratta di funzionalità di base.

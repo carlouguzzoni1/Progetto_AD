@@ -9,6 +9,9 @@ class FileServer(rpyc.Service):
     Implements the file server, which is a storage node in the sym-DFS
     architecture.
     """
+    # TODO: implementare oscuramento password file server (app-starter).
+    
+    # TODO: implementare meccanismo di spegnimento per interruzioni forzate.
     
     def __init__(self, ns_host, ns_port):
         self.ns_host    = ns_host
