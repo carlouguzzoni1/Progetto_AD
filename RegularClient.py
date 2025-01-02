@@ -50,12 +50,13 @@ class RegularClient(BaseClient):
         
         username    = input("Insert username: ")
         password    = getpass("Insert password: ")
-        result      = self.conn.root.authenticate_user(username, password, False)
+        result      = self.conn.root.authenticate_user(username, password)
         
         if result["status"]:
             self.user_is_logged     = True
             self.logged_username    = username
             self.files_dir          = "./CLI/{}".format(username)
+            self.token              = result["token"]
             
             # Check whether the client actually has a local files directory.
             if not os.path.exists(self.files_dir):
@@ -69,11 +70,12 @@ class RegularClient(BaseClient):
         
         if self.user_is_logged:
             # Update the user status in the name server's database.
-            result = self.conn.root.logout(self.logged_username)
+            result = self.conn.root.logout(self.token)
             # Reset the client's state.
             self.user_is_logged     = False
             self.logged_username    = None
             self.files_dir          = None
+            self.token              = None
             print(result)
         else:
             print("No user is logged in.")

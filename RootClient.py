@@ -17,8 +17,11 @@ class RootClient(BaseClient):
     # TODO: implementare visualizzazione dati di tutti i file servers (dfs).
     #       Formato: nome | stato | indirizzo | porta | dimensione | spazio libero
     
-    # FIXME: sostituire il while True con un while not nella procedura di creazione
-    #        di un root client (app-starter).
+    # NOTE: la procedura di creazione di un client root utilizza lo stesso metodo
+    #       esposto dal file server per la creazione di un client regolare. In
+    #       ogni caso, per la creazione di un utente root è richiesta una certa
+    #       passphrase, definita solo lato-server e non direttamente accessibile
+    #       dai client regolari.
     
     # NOTE: il RootClient è pensato come un utente con privilegi speciali, che
     #       interagisce con le altre entità in caso di manutenzione del sistema.
@@ -95,23 +98,23 @@ class RootClient(BaseClient):
         
         self.connect()  # Connect to the name server.
         
-        while True:
-            # Check if the name server has a root user.
-            if not self.conn.root.exists_root_user():
-                # If not, create one.
-                print("No root user was found. Creating one...")
-                username = input("Insert username: ")
-                password = getpass("Insert password: ")
-                
-                result = self.conn.root.create_user(username, password, is_root=True)
-                
-                print(result["message"])
-                
-                # If the creation was successful, break the loop.
-                if result["status"]:
-                    break
-            else:
-                break
+        # Check if the name server has a root user.
+        while not self.conn.root.exists_root_user():
+            # If not, create one.
+            print("No root user was found. Creating one...")
+            
+            username        = input("Insert username: ")
+            password        = getpass("Insert password: ")
+            root_passphrase = getpass("Insert root passphrase: ")
+            
+            result  = self.conn.root.create_user(
+                username,
+                password,
+                True,
+                root_passphrase
+                )
+            
+            print(result["message"])
         
         # Login as root.
         while True:
@@ -119,12 +122,13 @@ class RootClient(BaseClient):
             username = input("Insert username: ")
             password = getpass("Insert password: ")
             
-            result = self.conn.root.authenticate_user(username, password, True)
+            result = self.conn.root.authenticate_user(username, password)
             
             if result["status"]:
                 self.user_is_logged     = True
                 self.logged_username    = username
                 self.files_dir          = "./CLI/{}".format(username)
+                self.token              = result["token"]
                 
                 # Check whether the root client actually has a local files directory.
                 if not os.path.exists(self.files_dir):
@@ -159,7 +163,7 @@ class RootClient(BaseClient):
                 case "exit":
                     print("Exiting...")
                     # Update the user status in the name server's database.
-                    self.conn.root.logout(self.logged_username)
+                    self.conn.root.logout(self.token)
                     # Close the connection.
                     self.conn.close()
                     break

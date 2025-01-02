@@ -19,6 +19,7 @@ class FileServer(rpyc.Service):
         self.port       = None
         self.files_dir  = None
         self.name       = None
+        self.token      = None
     
     
     def __del__(self):
@@ -99,6 +100,7 @@ class FileServer(rpyc.Service):
             self.port       = result["port"]
             self.files_dir  = "./FS/{}".format(name)
             self.name       = name
+            self.token      = result["token"]
             
             # Check whether the file server actually has a local storage directory associated.
             if not os.path.exists(self.files_dir):

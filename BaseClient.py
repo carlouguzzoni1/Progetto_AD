@@ -36,6 +36,7 @@ class BaseClient(ABC):
         self.user_is_logged     = False
         self.logged_username    = None
         self.files_dir          = None
+        self.token              = None
     
     
     def __del__(self):
@@ -87,7 +88,7 @@ class BaseClient(ABC):
         
         username = input("Insert username: ")
         password = getpass("Insert password: ")
-        result = self.conn.root.create_user(username, password, False)
+        result = self.conn.root.create_user(username, password)
         print(result["message"])
     
     
@@ -116,7 +117,7 @@ class BaseClient(ABC):
         if not self.user_is_logged:
             print("You must be logged in to list files.")
         else:
-            result = self.conn.root.get_user_files(self.logged_username)
+            result = self.conn.root.get_user_files(self.token)
             
             print(result["message"])
             
@@ -157,7 +158,7 @@ class BaseClient(ABC):
         result      = self.conn.root.get_file_server(
             utils.generate_uuid(),
             file_name,
-            self.logged_username,
+            self.token,
             file_size,
             utils.calculate_checksum(file_path)
             )
