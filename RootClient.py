@@ -14,6 +14,8 @@ class RootClient(BaseClient):
     # TODO: implementare visualizzazione metadati di tutti i files attualemente
     #       nel database del name server (dfs).
     #       Formato: nome | dimensione | proprietario | checksum | server
+    # TODO: implementare visualizzazione dati di tutti i clients (dfs).
+    #       Formato: nome | stato
     # TODO: implementare visualizzazione dati di tutti i file servers (dfs).
     #       Formato: nome | stato | indirizzo | porta | dimensione | spazio libero
     
@@ -22,6 +24,10 @@ class RootClient(BaseClient):
     #       ogni caso, per la creazione di un utente root è richiesta una certa
     #       passphrase, definita solo lato-server e non direttamente accessibile
     #       dai client regolari.
+    
+    # IMPROVE: si potrebbe consentire al root client di cancellare files od utenti,
+    #          in modo forzato, qualora essi violassero le policy dell'amministratore.
+    #          In tal caso, si dovrebbe però iscrivere il tutto in un file di log.
     
     # NOTE: il RootClient è pensato come un utente con privilegi speciali, che
     #       interagisce con le altre entità in caso di manutenzione del sistema.

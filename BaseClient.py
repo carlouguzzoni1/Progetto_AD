@@ -49,7 +49,7 @@ class BaseClient(ABC):
         # Update the client's status in the name server's database.
         if self.user_is_logged:
             try:
-                self.conn.root.update_client_status(self.logged_username, False)
+                self.conn.root.update_client_status(self.logged_username, False, self.token)
             
             except Exception as e:
                 print(f"Error updating client status: {e}")
@@ -101,7 +101,7 @@ class BaseClient(ABC):
             username = input("Insert username: ")
             password = getpass("Insert password: ")
             result = self.conn.root.delete_user(username, password)
-            print(result["message"])
+            print(result)
     
     
     @abstractmethod
@@ -155,7 +155,7 @@ class BaseClient(ABC):
         file_size    = os.path.getsize(file_path)
         
         # Ask the name server for the file server.
-        result      = self.conn.root.get_file_server(
+        result      = self.conn.root.get_file_server_upload(
             utils.generate_uuid(),
             file_name,
             self.token,
@@ -187,10 +187,30 @@ class BaseClient(ABC):
     
     
     def upload(self):
-        """Uploads a file into the DFS."""
+        """User interface for uploading a file."""
         
         if not self.user_is_logged:
             print("You must be logged in to upload a file.")
         else:
             file_path = input("Insert file path: ")
             self.upload_file(file_path)
+    
+    
+    def download_file(self, file_name):
+        """
+        Downloads a file from the DFS.
+        Args:
+            file_name (str): The name of the file to download.
+        """
+        
+        pass
+    
+    
+    def download(self):
+        """User interface for downloading a file."""
+        
+        if not self.user_is_logged:
+            print("You must be logged in to download a file.")
+        else:
+            file_name = input("Insert file name: ")
+            self.download_file(file_name)

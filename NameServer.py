@@ -25,14 +25,22 @@ class NameServerService(rpyc.Service):
     Represents the name server, which is the central node in the sym-DFS architecture.
     Name server is a singleton.
     """    
-    # FIXME: definire funzione per l'estrazione dell'username dal token per
-    #        evitare replicazione di codice.
-    
     # NOTE: sebbene sia stata implementata la disconnessione logica sul database
     #       in ogni client e file server, è possibile che il name server venga
-    #       disconnesso prima. In casi come questo, clients e file servers perman-
-    #       gono nel database come connessi.
-    # TODO: la soluzione più adatta potrebbe essere l'uso di un sistema di heart-beat.
+    #       disconnesso in modo improvviso prima che le altre componenti possano
+    #       a loro volta disconnettersi in modo sicuro. In casi come questo,
+    #       clients e file servers permangono nel database come connessi.
+    #       La soluzione migliore potrebbe essere quella di implementare un
+    #       meccanismo di heart-beat, che controlli periodicamente lo stato delle
+    #       connessioni attive e vada ad aggiornare il database.
+    #       Se il name server viene disconnesso in modo improvviso poco importa,
+    #       perché lo stato del database non avrà più importanza a quel punto.
+    # TODO: implementare il meccanismo di heart-beat ed eliminare le proce-
+    #       dure di disconnessione logica nei metodi __del__.
+    
+    # TODO: heart-beat da implementare:
+    #           - Consistenza
+    #           - Replica
     
     # NOTE: sqlite3 è di default in modalità "serialized", ciò significa che si
     #       possono eseguire più thread in simultanea senza restrizioni.
@@ -180,6 +188,26 @@ class NameServerService(rpyc.Service):
         token = jwt.encode(payload, self._secret_key, algorithm="HS256")
         
         return token
+    
+    
+    def _get_token_payload(self, token):
+        """
+        Gets the payload of a JWT token.
+        Args:
+            token (str):  The JWT token.
+        Returns:
+            dict:         The payload of the token.
+        """
+        
+        try:
+            payload = jwt.decode(token, self._secret_key, algorithms=["HS256"])
+        
+        except jwt.InvalidTokenError as e:
+            print("Error decoding JWT token:", e)
+            
+            return None
+        
+        return payload
     
     
     def exposed_create_user(self, username, password, is_root=False, root_passphrase=None):
@@ -610,20 +638,20 @@ class NameServerService(rpyc.Service):
             str:            A message indicating the result of the operation.
         """
         
-        conn        = sqlite3.connect(self.db_path)
-        cursor      = conn.cursor()
+        conn            = sqlite3.connect(self.db_path)
+        cursor          = conn.cursor()
         
         # Get the username from the token.
-        try:
-            payload     = jwt.decode(token, self._secret_key, algorithms=["HS256"])
-            username    = payload["username"]
+        payload         = self._get_token_payload(token)
         
-        except jwt.InvalidTokenError as e:
-            print("Error decoding JWT token:", e)
+        if payload is None:
             conn.close()
             
             return f"Error logging out. Corrupted token."
+        else:
+            username    = payload["username"]
         
+        # Update the user's online status.
         try:
             cursor.execute("""
                 UPDATE users
@@ -657,18 +685,17 @@ class NameServerService(rpyc.Service):
         cursor = conn.cursor()
         
         # Get the username from the token.
-        try:
-            payload     = jwt.decode(token, self._secret_key, algorithms=["HS256"])
-            username    = payload["username"]
+        payload = self._get_token_payload(token)
         
-        except jwt.InvalidTokenError as e:
-            print("Error decoding JWT token:", e)
+        if payload is None:
             conn.close()
             
             return {
                 "status": False,
                 "message": "Error getting user files. Corrupted token."
-            }
+                }
+        else:
+            username = payload["username"]
         
         # Get the files owned by the user.
         try:
@@ -706,7 +733,7 @@ class NameServerService(rpyc.Service):
             conn.close()
     
     
-    def exposed_get_file_server(self, uuid, file_name, token, file_size, checksum):
+    def exposed_get_file_server_upload(self, uuid, file_name, token, file_size, checksum):
         """
         Gets the best file server to store a file according to K-least loaded
         policy.
@@ -794,17 +821,15 @@ class NameServerService(rpyc.Service):
             conn.close()
         
         # Get the username from the token.
-        try:
-            payload     = jwt.decode(token, self._secret_key, algorithms=["HS256"])
-            username    = payload["username"]
+        payload = self._get_token_payload(token)
         
-        except jwt.InvalidTokenError as e:
-            print("Error decoding JWT token:", e)
-            
+        if payload is None:
             return {
                 "status": False,
                 "message": f"Error getting user files. Corrupted token."
                 }
+        else:
+            username = payload["username"]
         
         # Create new entry into the files table.
         conn = sqlite3.connect(self.db_path)
@@ -868,15 +893,13 @@ class NameServerService(rpyc.Service):
         cursor = conn.cursor()
         
         # Get username and role from the token.
-        try:
-            payload     = jwt.decode(token, self._secret_key, algorithms=["HS256"])
-            username    = payload["username"]
-            role        = payload["role"]
+        payload = self._get_token_payload(token)
         
-        except jwt.InvalidTokenError as e:
-            print("Error decoding JWT token:", e)
-            
+        if payload is None:
             return f"Error turning off file server '{name}'. Corrupted token."
+        else:
+            username = payload["username"]
+            role     = payload["role"]
         
         # Check whether the requestor has the necessary privileges.
         if role != "file_server" or username != name:
@@ -923,14 +946,12 @@ class NameServerService(rpyc.Service):
         cursor = conn.cursor()
         
         # Get username and role from the token.
-        try:
-            payload         = jwt.decode(token, self._secret_key, algorithms=["HS256"])
-            token_username  = payload["username"]
+        payload = self._get_token_payload(token)
         
-        except jwt.InvalidTokenError as e:
-            print("Error decoding JWT token:", e)
-            
+        if payload is None:
             return f"Error updating client '{username}'. Corrupted token."
+        else:
+            token_username = payload["username"]
         
         # Check whether the requestor has the necessary privileges.
         if token_username != username:

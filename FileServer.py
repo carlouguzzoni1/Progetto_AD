@@ -32,7 +32,7 @@ class FileServer(rpyc.Service):
         
         # Update the file server's status in the name server's database.
         try:
-            self.conn.root.update_file_server_status(self.name, False)
+            self.conn.root.update_file_server_status(self.name, False, self.token)
         
         except Exception as e:
             print(f"Error updating file server status: {e}")
