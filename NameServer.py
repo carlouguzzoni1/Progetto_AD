@@ -24,7 +24,8 @@ class NameServerService(rpyc.Service):
     """
     Represents the name server, which is the central node in the sym-DFS architecture.
     Name server is a singleton.
-    """    
+    """
+    
     # NOTE: sebbene sia stata implementata la disconnessione logica sul database
     #       in ogni client e file server, è possibile che il name server venga
     #       disconnesso in modo improvviso prima che le altre componenti possano
@@ -35,12 +36,6 @@ class NameServerService(rpyc.Service):
     #       connessioni attive e vada ad aggiornare il database.
     #       Se il name server viene disconnesso in modo improvviso poco importa,
     #       perché lo stato del database non avrà più importanza a quel punto.
-    # TODO: implementare il meccanismo di heart-beat ed eliminare le proce-
-    #       dure di disconnessione logica nei metodi __del__.
-    
-    # TODO: heart-beat da implementare:
-    #           - Consistenza
-    #           - Replica
     
     # NOTE: sqlite3 è di default in modalità "serialized", ciò significa che si
     #       possono eseguire più thread in simultanea senza restrizioni.
@@ -144,6 +139,7 @@ class NameServerService(rpyc.Service):
                         size INTEGER,
                         checksum TEXT,
                         primary_server TEXT,
+                        uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         FOREIGN KEY (primary_server) REFERENCES file_servers (name),
                         FOREIGN KEY (owner) REFERENCES users (username)
                     );
@@ -700,7 +696,7 @@ class NameServerService(rpyc.Service):
         # Get the files owned by the user.
         try:
             cursor.execute("""
-                SELECT name, owner, size, checksum, primary_server
+                SELECT name, owner, size, checksum, uploaded_at, primary_server
                 FROM files
                 WHERE owner = ?
                 """,

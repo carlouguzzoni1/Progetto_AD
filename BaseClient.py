@@ -9,8 +9,6 @@ from getpass import getpass
 
 class BaseClient(ABC):
     """Abstract base class for client classes."""
-    # TODO: implementare download (dfs).
-    # TODO: implementare cancellazione (dfs).
     
     # NOTE: le procedure di visualizzazione/upload/download/cancellazione di files
     #       dovrebbero essere le stesse per regular e root clients, in quanto si
@@ -124,7 +122,7 @@ class BaseClient(ABC):
             # If the operation was successful, print the result.
             if result["status"]:
                 # Convert the result to a list of dictionaries.
-                headers = ["File", "Owner", "Size", "Checksum", "Primary Server"]
+                headers = ["File", "Owner", "Size", "Checksum", "Uploaded at", "Primary Server"]
                 result["files"]  = [dict(zip(headers, row)) for row in result["files"]]
                 
                 MAX_CHECKSUM_LEN = 15
@@ -135,6 +133,7 @@ class BaseClient(ABC):
                         "Owner"         : f["Owner"],
                         "Size"          : f["Size"],
                         "Checksum"      : utils.truncate(f["Checksum"], MAX_CHECKSUM_LEN),
+                        "Uploaded at"   : f["Uploaded at"],
                         "Primary Server": f["Primary Server"]
                     }
                     for f in result["files"]
