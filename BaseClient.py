@@ -9,8 +9,8 @@ from getpass import getpass
 
 class BaseClient(ABC):
     """Abstract base class for client classes."""
-    # TODO: implementare download lato-client (dfs).
-    # TODO: implementare cancellazione lato-client (dfs).
+    # TODO: implementare download (dfs).
+    # TODO: implementare cancellazione (dfs).
     
     # NOTE: le procedure di visualizzazione/upload/download/cancellazione di files
     #       dovrebbero essere le stesse per regular e root clients, in quanto si
@@ -21,7 +21,7 @@ class BaseClient(ABC):
     #       fatto la stessa persona, ma non si fanno supposizioni sulla località
     #       di tale host. Per questo motivo, il client non si accolla l'onere di
     #       cancellare la directory locale per tale utente, che pur non essendo
-    #       più registrato, potrà usufruire dei files che aveva scaricato.
+    #       più registrato, potrà ugualmente usufruire dei files che aveva scaricato.
     
     def __init__(self, host, port):
         """Initializes the client.
@@ -36,6 +36,7 @@ class BaseClient(ABC):
         self.user_is_logged     = False
         self.logged_username    = None
         self.files_dir          = None
+        self.token              = None
     
     
     def __del__(self):
@@ -46,15 +47,16 @@ class BaseClient(ABC):
         print("Shutting down client...")
         
         # Update the client's status in the name server's database.
-        try:
-            self.conn.root.update_client_status(self.logged_username, False)
-        
-        except Exception as e:
-            print(f"Error updating client status: {e}")
-        
-        finally:
-            # Close the connection.
-            self.conn.close()
+        if self.user_is_logged:
+            try:
+                self.conn.root.update_client_status(self.logged_username, False, self.token)
+            
+            except Exception as e:
+                print(f"Error updating client status: {e}")
+            
+            finally:
+                # Close the connection.
+                self.conn.close()
     
     
     def connect(self):
@@ -86,7 +88,7 @@ class BaseClient(ABC):
         
         username = input("Insert username: ")
         password = getpass("Insert password: ")
-        result = self.conn.root.create_user(username, password, False)
+        result = self.conn.root.create_user(username, password)
         print(result["message"])
     
     
@@ -115,7 +117,7 @@ class BaseClient(ABC):
         if not self.user_is_logged:
             print("You must be logged in to list files.")
         else:
-            result = self.conn.root.get_user_files(self.logged_username)
+            result = self.conn.root.get_user_files(self.token)
             
             print(result["message"])
             
@@ -153,10 +155,10 @@ class BaseClient(ABC):
         file_size    = os.path.getsize(file_path)
         
         # Ask the name server for the file server.
-        result      = self.conn.root.get_file_server(
+        result      = self.conn.root.get_file_server_upload(
             utils.generate_uuid(),
             file_name,
-            self.logged_username,
+            self.token,
             file_size,
             utils.calculate_checksum(file_path)
             )
@@ -185,7 +187,7 @@ class BaseClient(ABC):
     
     
     def upload(self):
-        """Uploads a file into the DFS."""
+        """User interface for uploading a file."""
         
         if not self.user_is_logged:
             print("You must be logged in to upload a file.")
@@ -194,3 +196,21 @@ class BaseClient(ABC):
             self.upload_file(file_path)
     
     
+    def download_file(self, file_name):
+        """
+        Downloads a file from the DFS.
+        Args:
+            file_name (str): The name of the file to download.
+        """
+        
+        pass
+    
+    
+    def download(self):
+        """User interface for downloading a file."""
+        
+        if not self.user_is_logged:
+            print("You must be logged in to download a file.")
+        else:
+            file_name = input("Insert file name: ")
+            self.download_file(file_name)

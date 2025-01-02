@@ -3,6 +3,8 @@ import random
 import sqlite3
 import rpyc
 from bcrypt import hashpw, gensalt, checkpw
+import jwt
+import secrets
 
 
 
@@ -10,32 +12,43 @@ LOCKFILE_PATH   = "./NS/nameserver.lock"
 DB_PATH         = "./NS/NS.db"
 SERVER_PORT     = 18861
 
+# NOTE: i parametri di sicurezza vengono impostati come variabili globali per
+#       semplicità. Nonappena possibile si migrerà verso l'uso di variabili
+#       d'ambiente o file di configurazione protetti.
+SECRET_KEY      = secrets.token_urlsafe(64)
+ROOT_PASSPHRASE = "sym-DFS-project"
+
 
 
 class NameServerService(rpyc.Service):
     """
     Represents the name server, which is the central node in the sym-DFS architecture.
     Name server is a singleton.
-    """
-    # TODO: inserire meccanismo di heart-beat per spegnere logicamente file servers
-    #       ed utenti disconnessi tramite una procedura non regolare (dfs).
+    """    
+    # NOTE: sebbene sia stata implementata la disconnessione logica sul database
+    #       in ogni client e file server, è possibile che il name server venga
+    #       disconnesso in modo improvviso prima che le altre componenti possano
+    #       a loro volta disconnettersi in modo sicuro. In casi come questo,
+    #       clients e file servers permangono nel database come connessi.
+    #       La soluzione migliore potrebbe essere quella di implementare un
+    #       meccanismo di heart-beat, che controlli periodicamente lo stato delle
+    #       connessioni attive e vada ad aggiornare il database.
+    #       Se il name server viene disconnesso in modo improvviso poco importa,
+    #       perché lo stato del database non avrà più importanza a quel punto.
+    # TODO: implementare il meccanismo di heart-beat ed eliminare le proce-
+    #       dure di disconnessione logica nei metodi __del__.
     
-    # TODO: la cancellazione di un utente deve eliminare anche tutti i suoi files
-    #       nel database del name server (dfs).
-    
-    # FIXME: trovare un meccanismo più sicuro per creazione/autenticazione di un
-    #       utente. Non deve essere possibile ad un regular client con accesso al
-    #       codice di creare/impersonare l'utente root (app-starter).
-    # FIXME: stesso che sopra, ma per l'aggiornamento dello stato di utenti/file
-    #       servers.
+    # TODO: heart-beat da implementare:
+    #           - Consistenza
+    #           - Replica
     
     # NOTE: sqlite3 è di default in modalità "serialized", ciò significa che si
     #       possono eseguire più thread in simultanea senza restrizioni.
     #       https://docs.python.org/3/library/sqlite3.html#sqlite3.threadsafety
     #       Il progetto si può estendere per supportare accesso concorrente al DB.
     
-    _instance   = None          # NameServerService active instance.
-    _lock_file  = LOCKFILE_PATH # File used to lock the file server.
+    _instance           = None              # NameServerService active instance.
+    _lock_file          = LOCKFILE_PATH     # File used to lock the file server.
     
     
     def __new__(cls, *args, **kwargs):
@@ -57,8 +70,10 @@ class NameServerService(rpyc.Service):
     
     
     def __init__(self, host="localhost", port=SERVER_PORT):
-        self.db_path        = DB_PATH
-        self.server_port    = port
+        self.db_path            = DB_PATH
+        self.server_port        = port
+        self._secret_key        = SECRET_KEY        # Secret key for JWT tokens.
+        self._root_passphrase   = ROOT_PASSPHRASE   # Root passphrase for creating root users.
         
         self._setup_database()
     
@@ -156,21 +171,68 @@ class NameServerService(rpyc.Service):
             print("Database created.")
     
     
-    def exposed_create_user(self, username, password, is_root=False):
+    def _generate_token(self, user_id, role):
+        """
+        Generates a JWT token for the client.
+        Args:
+            user_id (str):  The username of the user.
+            role (str):     The role of the user.
+        Returns:
+            str:            The generated JWT token.
+        """
+        
+        payload = {
+            "username": user_id,
+            "role":     role
+        }
+        token = jwt.encode(payload, self._secret_key, algorithm="HS256")
+        
+        return token
+    
+    
+    def _get_token_payload(self, token):
+        """
+        Gets the payload of a JWT token.
+        Args:
+            token (str):  The JWT token.
+        Returns:
+            dict:         The payload of the token.
+        """
+        
+        try:
+            payload = jwt.decode(token, self._secret_key, algorithms=["HS256"])
+        
+        except jwt.InvalidTokenError as e:
+            print("Error decoding JWT token:", e)
+            
+            return None
+        
+        return payload
+    
+    
+    def exposed_create_user(self, username, password, is_root=False, root_passphrase=None):
         """
         Creates a new user.
         Args:   
-            username (str): The username of the new user.
-            password (str): The password of the new user.
-            is_root (bool): Whether the new user is a root user.
+            username (str):         The username of the new user.
+            password (str):         The password of the new user.
+            is_root (bool):         Whether the new user is a root user.
+            root_passphrase (str):  The passphrase of the root user.
         Returns:
-            dict:           A dictionary containing the result of the operation
-                            and a message.
+            dict:                   A dictionary containing the result of the operation
+                                    and a message.
         """
         
         conn            = sqlite3.connect(self.db_path)
         cursor          = conn.cursor()
         hashed_password = hashpw(password.encode('utf-8'), gensalt())
+        
+        # Check if someone unauthorized is trying to create a root user.
+        if is_root and root_passphrase != ROOT_PASSPHRASE:
+            return {
+                "status": False,
+                "message": "Invalid root passphrase. Unauthorized action."
+            }
         
         # Create the user.
         try:
@@ -217,7 +279,7 @@ class NameServerService(rpyc.Service):
         cursor          = conn.cursor()
         hashed_password = hashpw(password.encode('utf-8'), gensalt())
         
-        # Verify conflicts with the ame server.
+        # Verify conflicts with the name server.
         if host == "localhost" or host == "127.0.0.1":
             if port == self.server_port:
                 return f"Error: File server port {port} conflicts with Name Server port."
@@ -243,13 +305,12 @@ class NameServerService(rpyc.Service):
             conn.close()
     
     
-    def exposed_authenticate_user(self, username, password, is_root=False):
+    def exposed_authenticate_user(self, username, password):
         """
         Authenticates a user.
         Args:
             username (str): The username of the user.
             password (str): The password of the user.
-            is_root (bool): Whether the user is a root user.
         Returns:
             dict:           A dictionary containing the result of the operation.
         """
@@ -308,25 +369,13 @@ class NameServerService(rpyc.Service):
                 "message": f"Error: wrong password for user '{username}'."
                 }
         
-        # Check user root status. Can authenticate root user only when is_root is True.
-        # Root user trying to authenticate a non-root user.
-        if is_root and not result[2]:
-            conn.close()
-            
-            return {
-                "status": False,
-                "message": f"Error: user '{username}' is not a root user."
-                }
-        
-        # Non-root user trying to authenticate a root user.
-        if not is_root and result[2]:
-            conn.close()
-            
-            return {
-                "status": False,
-                "message": f"Error: user '{username}' is a root user."}
-        
         # If login can be done (checks passed successfully).
+        
+        # Check user root status. Create a token depending on the root status.
+        if result[2]:
+            token = self._generate_token(username, "root")
+        else:
+            token = self._generate_token(username, "regular")
         
         # Try to update user online status.
         try:
@@ -341,7 +390,8 @@ class NameServerService(rpyc.Service):
             
             return {
                 "status": True,
-                "message": f"User '{username}' authenticated successfully."
+                "message": f"User '{username}' authenticated successfully.",
+                "token": token
                 }
         
         except sqlite3.OperationalError as e:
@@ -422,6 +472,9 @@ class NameServerService(rpyc.Service):
         
         # If login can be done (checks passed successfully).
         
+        # Generate a token.
+        token = self._generate_token(name, "file_server")
+        
         # Try to update file server online status.
         try:
             cursor.execute("""
@@ -437,7 +490,8 @@ class NameServerService(rpyc.Service):
                 "status": True,
                 "message": f"File server '{name}' authenticated successfully.",
                 "host": result[2],
-                "port": result[3]
+                "port": result[3],
+                "token": token
                 }
         
         except sqlite3.OperationalError as e:
@@ -480,28 +534,25 @@ class NameServerService(rpyc.Service):
             print("Error selecting record for user:", e)
             conn.close()
             
-            return {"status": False, "message": f"Error deleting user."}
+            return f"Error deleting user."
         
         # Check user existence. User must exist.
         if result is None:
             conn.close()
             
-            return {"status": False, "message": f"Error: user '{username}' not found."}
+            return f"Error: user '{username}' not found."
         
         # Check user root status. User must not be root.
         if result[0]:
             conn.close()
             
-            return {
-                "status": False,
-                "message": f"Error: you don't have the needed permissions to delete user '{username}'."
-                }
+            return f"Error: you don't have the needed permissions to delete user '{username}'."
         
         # Check user online status. User must not be online.
         if result[2]:
             conn.close()
             
-            return {"status": False, "message": f"Error: user '{username}' is currently logged in."}
+            return f"Error: user '{username}' is currently logged in."
         
         # Check user password validity. Password must be correct.
         password_match = checkpw(password.encode('utf-8'), result[1])
@@ -509,9 +560,9 @@ class NameServerService(rpyc.Service):
         if not password_match:
             conn.close()
             
-            return {"status": False, "message": f"Error: wrong password for user '{username}'."}
+            return f"Error: wrong password for user '{username}'."
         
-        # Delete the user.
+        # Delete the user and his/her files and replicas.
         try:
             cursor.execute(
                 """
@@ -521,13 +572,29 @@ class NameServerService(rpyc.Service):
                 )
             conn.commit()
             
-            return {"status": True, "message": f"User '{username}' deleted successfully."}
+            cursor.execute(
+                """
+                DELETE FROM files WHERE owner = ?
+                """,
+                (username,)
+                )
+            conn.commit()
+            
+            cursor.execute(
+                """
+                DELETE FROM replicas WHERE owner = ?
+                """,
+                (username,)
+                )
+            conn.commit()
+            
+            return f"User '{username}' deleted successfully."
         
         except sqlite3.OperationalError as e:
-            print("Error deleting record for user:", e)
+            print("Error while deleting user:", e)
             conn.close()
             
-            return f"Error deleting user."
+            return f"Error deleting user {username}."
         
         finally:
             conn.close()
@@ -562,18 +629,29 @@ class NameServerService(rpyc.Service):
             return False
     
     
-    def exposed_logout(self, username):
+    def exposed_logout(self, token):
         """
         Logs out a user.
         Args:
-            username (str): The username of the user.
+            token (str):    The JWT token of the user.
         Returns:
             str:            A message indicating the result of the operation.
         """
         
-        conn        = sqlite3.connect(self.db_path)
-        cursor      = conn.cursor()
+        conn            = sqlite3.connect(self.db_path)
+        cursor          = conn.cursor()
         
+        # Get the username from the token.
+        payload         = self._get_token_payload(token)
+        
+        if payload is None:
+            conn.close()
+            
+            return f"Error logging out. Corrupted token."
+        else:
+            username    = payload["username"]
+        
+        # Update the user's online status.
         try:
             cursor.execute("""
                 UPDATE users
@@ -594,17 +672,30 @@ class NameServerService(rpyc.Service):
             return f"Error logging out user '{username}'."
     
     
-    def exposed_get_user_files(self, username):
+    def exposed_get_user_files(self, token):
         """
         Gets the files owned by a user.
         Args:
-            username (str): The username of the user.
+            token (str):    The JWT token of the user.
         Returns:
             list:           A list of dictionaries containing the file information.
         """
         
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
+        
+        # Get the username from the token.
+        payload = self._get_token_payload(token)
+        
+        if payload is None:
+            conn.close()
+            
+            return {
+                "status": False,
+                "message": "Error getting user files. Corrupted token."
+                }
+        else:
+            username = payload["username"]
         
         # Get the files owned by the user.
         try:
@@ -617,11 +708,18 @@ class NameServerService(rpyc.Service):
                 )
             result = cursor.fetchall()
             
-            return {
-                "status": True,
-                "message": f"Files for user '{username}' retrieved successfully.",
-                "files": result
-                }
+            # Check whether the user has any files.
+            if not result:
+                return {
+                    "status": False,
+                    "message": f"User '{username}' has no files."
+                    }
+            else:
+                return {
+                    "status": True,
+                    "message": f"Files for user '{username}' retrieved successfully.",
+                    "files": result
+                    }
         
         except sqlite3.OperationalError as e:
             print(f"Error selecting record for user:", e)
@@ -635,14 +733,14 @@ class NameServerService(rpyc.Service):
             conn.close()
     
     
-    def exposed_get_file_server(self, uuid, file_name, username, file_size, checksum):
+    def exposed_get_file_server_upload(self, uuid, file_name, token, file_size, checksum):
         """
         Gets the best file server to store a file according to K-least loaded
         policy.
         Args:
             uuid (str):         The uuid of the file server.
             file_name (str):    The name of the file.
-            username (str):     The username of the user.
+            token (str):        The JWT token of the user.
             file_size (int):    The size of the file.
             checksum (str):     The checksum of the file.
         Returns:
@@ -722,6 +820,17 @@ class NameServerService(rpyc.Service):
         finally:
             conn.close()
         
+        # Get the username from the token.
+        payload = self._get_token_payload(token)
+        
+        if payload is None:
+            return {
+                "status": False,
+                "message": f"Error getting user files. Corrupted token."
+                }
+        else:
+            username = payload["username"]
+        
         # Create new entry into the files table.
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
@@ -769,18 +878,37 @@ class NameServerService(rpyc.Service):
             }
     
     
-    def exposed_update_file_server_status(self, name, status):
+    def exposed_update_file_server_status(self, name, status, token):
         """
         Turns off a file server.
         Args:
             name (str):     The name of the file server.
             status (bool):  The new status of the file server.
+            token (str):    The token of the requestor.
         Returns:
             str:            A message indicating the result of the operation.
         """
         
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
+        
+        # Get username and role from the token.
+        payload = self._get_token_payload(token)
+        
+        if payload is None:
+            return f"Error turning off file server '{name}'. Corrupted token."
+        else:
+            username = payload["username"]
+            role     = payload["role"]
+        
+        # Check whether the requestor has the necessary privileges.
+        if role != "file_server" or username != name:
+            return f"""
+                Error turning off file server '{name}'.
+                Requestor does not have the necessary privileges.
+                """
+        
+        # Check whether the file server is already turned off.
         
         # Turn off the file server.
         try:
@@ -804,7 +932,7 @@ class NameServerService(rpyc.Service):
             conn.close()
     
     
-    def exposed_update_client_status(self, username, status):
+    def exposed_update_client_status(self, username, status, token):
         """
         Updates the status of a client.
         Args:
@@ -816,6 +944,21 @@ class NameServerService(rpyc.Service):
         
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
+        
+        # Get username and role from the token.
+        payload = self._get_token_payload(token)
+        
+        if payload is None:
+            return f"Error updating client '{username}'. Corrupted token."
+        else:
+            token_username = payload["username"]
+        
+        # Check whether the requestor has the necessary privileges.
+        if token_username != username:
+            return f"""
+                Error updating client '{username}'.
+                Requestor does not have the necessary privileges.
+                """
         
         # Update the client's status.
         try:

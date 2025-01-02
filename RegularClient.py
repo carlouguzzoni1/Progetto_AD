@@ -43,14 +43,20 @@ class RegularClient(BaseClient):
     def login(self):
         """Authenticates a regular user."""
         
+        # Check whether a user is already logged in.
+        if self.user_is_logged:
+            print("Cannot login: an user is already logged in.")
+            return
+        
         username    = input("Insert username: ")
         password    = getpass("Insert password: ")
-        result      = self.conn.root.authenticate_user(username, password, False)
+        result      = self.conn.root.authenticate_user(username, password)
         
         if result["status"]:
             self.user_is_logged     = True
             self.logged_username    = username
             self.files_dir          = "./CLI/{}".format(username)
+            self.token              = result["token"]
             
             # Check whether the client actually has a local files directory.
             if not os.path.exists(self.files_dir):
@@ -64,12 +70,13 @@ class RegularClient(BaseClient):
         
         if self.user_is_logged:
             # Update the user status in the name server's database.
-            self.conn.root.logout(self.logged_username)
+            result = self.conn.root.logout(self.token)
             # Reset the client's state.
             self.user_is_logged     = False
             self.logged_username    = None
             self.files_dir          = None
-            print("Logged out successfully.")
+            self.token              = None
+            print(result)
         else:
             print("No user is logged in.")
     
@@ -102,9 +109,8 @@ class RegularClient(BaseClient):
                     self.upload()
                 case "exit":
                     print("Exiting...")
-                    # If the user is logged in, log out before exiting.
-                    if self.user_is_logged:
-                        self.logout()
+                    # Log out before exiting.
+                    self.logout()
                     # Close the connection.
                     self.conn.close()
                     break

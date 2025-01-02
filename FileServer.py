@@ -19,6 +19,7 @@ class FileServer(rpyc.Service):
         self.port       = None
         self.files_dir  = None
         self.name       = None
+        self.token      = None
     
     
     def __del__(self):
@@ -31,7 +32,7 @@ class FileServer(rpyc.Service):
         
         # Update the file server's status in the name server's database.
         try:
-            self.conn.root.update_file_server_status(self.name, False)
+            self.conn.root.update_file_server_status(self.name, False, self.token)
         
         except Exception as e:
             print(f"Error updating file server status: {e}")
@@ -99,6 +100,7 @@ class FileServer(rpyc.Service):
             self.port       = result["port"]
             self.files_dir  = "./FS/{}".format(name)
             self.name       = name
+            self.token      = result["token"]
             
             # Check whether the file server actually has a local storage directory associated.
             if not os.path.exists(self.files_dir):
