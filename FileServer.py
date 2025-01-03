@@ -2,6 +2,7 @@ import os
 import sys
 import rpyc
 from getpass import getpass
+import jwt
 
 
 
@@ -40,6 +41,26 @@ class FileServer(rpyc.Service):
         finally:
             # Close the connection.
             self.conn.close()
+    
+    
+    def _get_token_payload(self, token):
+        """
+        Gets the payload of a JWT token.
+        Args:
+            token (str):  The JWT token.
+        Returns:
+            dict:         The payload of the token.
+        """
+        
+        try:
+            payload = jwt.decode(token, self.secret_key, algorithms=["HS256"])
+        
+        except jwt.InvalidTokenError as e:
+            print("Error decoding JWT token:", e)
+            
+            return None
+        
+        return payload
     
     
     def connect(self):
@@ -101,6 +122,7 @@ class FileServer(rpyc.Service):
             self.files_dir  = "./FS/{}".format(name)
             self.name       = name
             self.token      = result["token"]
+            self.secret_key = result["secret_key"]
             
             # Check whether the file server actually has a local storage directory associated.
             if not os.path.exists(self.files_dir):
@@ -137,18 +159,49 @@ class FileServer(rpyc.Service):
                     print("Unknown command.")
     
     
-    def exposed_store_file(self, file_name, file_data):
+    def exposed_store_file(self, file_path, file_data, token):
         """
         Stores a file on the file server.
         Args:
-            filename (str): The name of the file.
-            data (bytes):   The content of the file.
+            file_path (str):        The path of the file to store.
+            file_data (bytes):      The data of the file to store.
+            token (str):            The token of the client.
         Returns:
             bool:           True if the file is stored successfully, False otherwise.
         """
         
+        # Get the username from the token.
+        payload = self._get_token_payload(token)
+        
+        if payload is None:
+            return {"status": False, "message": "Error storing file. Corrupted token."}
+        else:
+            username = payload["username"]
+        
+        # Check whether there is already a base directory for the username.
+        user_basedir = os.path.join(self.files_dir, username)
+        
+        if not os.path.exists(user_basedir):
+            os.mkdir(user_basedir)
+        
+        # Split the file path into directories.
+        directories = file_path.split("/")
+        dir         = user_basedir
+        
+        # Get the file name.
+        file_name = os.path.basename(file_path)
+        
+        # Create the directories (if needed).
+        for directory in directories[:-1]:
+            dir = os.path.join(dir, directory)
+            print(dir)
+            
+            if not os.path.exists(dir):
+                os.mkdir(dir)
+        
         # Create the new file path.
-        file_path = os.path.join(self.files_dir, file_name)
+        file_path = os.path.join(dir, file_name)
+        print(file_path)
         
         # Try to store the file.
         try:

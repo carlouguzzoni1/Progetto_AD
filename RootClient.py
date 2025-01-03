@@ -11,12 +11,13 @@ LOCKFILE_PATH = "./NS/rootclient.lock"
 
 class RootClient(BaseClient):
     """Client class for root user. Root client is a singleton."""
-    # TODO: implementare visualizzazione metadati di tutti i files attualemente
-    #       nel database del name server (dfs).
+    
+    # TODO: visualizzazione metadati di tutti i files attualemente nel database
+    #       del name server (dfs).
     #       Formato: nome | dimensione | proprietario | checksum | server
-    # TODO: implementare visualizzazione dati di tutti i clients (dfs).
+    # TODO: visualizzazione dati di tutti i clients (dfs).
     #       Formato: nome | stato
-    # TODO: implementare visualizzazione dati di tutti i file servers (dfs).
+    # TODO: visualizzazione dati di tutti i file servers (dfs).
     #       Formato: nome | stato | indirizzo | porta | dimensione | spazio libero
     
     # NOTE: la procedura di creazione di un client root utilizza lo stesso metodo

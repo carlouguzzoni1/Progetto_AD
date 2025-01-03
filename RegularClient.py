@@ -8,6 +8,7 @@ from getpass import getpass
 
 class RegularClient(BaseClient):
     """Client class for regular users."""
+    
     # NOTE: il regular client è pensato per essere un utente generico del DFS.
     #       Le funzionalità sono pertanto quelle di base, definite nella classe
     #       BaseClient, più i metodi che consenstono l'interazione con l'utente.
