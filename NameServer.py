@@ -899,6 +899,99 @@ class NameServerService(rpyc.Service):
             }
     
     
+    def exposed_get_file_server_download(self, file_path, token):
+        """
+        Gets the primary server for a file, or in case it is offline, the first
+        file server available to download the file.
+        Args:
+            file_path (str):    The path of the file in the DFS.
+            token (str):        The token of the requestor.
+        Returns:
+            dict:               A dictionary containing the file server information.
+        """
+        
+        # Get the username from the token.
+        payload = self._get_token_payload(token)
+        
+        if payload is None:
+            return {
+                "status": False,
+                "message": f"Error getting file server. Corrupted token."
+                }
+        else:
+            username = payload["username"]
+        
+        # Get host and port of the primary server for the file.
+        conn    = sqlite3.connect(self.db_path)
+        cursor  = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                SELECT primary_server, address, port
+                FROM files
+                JOIN file_servers ON files.primary_server = file_servers.name
+                WHERE file_path = ?
+                AND owner = ?
+                """,
+                (file_path, username)
+                )
+            result = cursor.fetchone()
+        
+        except sqlite3.OperationalError as e:
+            print(f"Error selecting record for file:", e)
+            
+            return {
+                "status": False,
+                "message": f"Error getting file server for file '{file_path}'."
+                }
+        
+        finally:
+            conn.close()
+        
+        # Check whether there is a primary server for the file.
+        if result is None:
+            # If not, look for another file server to download the file.
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            try:
+                cursor.execute("""
+                    SELECT server, address, port
+                    FROM files
+                    JOIN replicas ON files.file_path = replicas.file_path
+                    JOIN file_servers ON replicas.server = file_servers.name
+                    WHERE file_path = ?
+                    """,
+                    (file_path,)
+                    )
+                result = cursor.fetchone()
+            
+            except sqlite3.OperationalError as e:
+                print(f"Error selecting record for replica of file:", e)
+                
+                return {
+                    "status": False,
+                    "message": f"Error getting file server for file '{file_path}'."
+                    }
+            
+            finally:
+                conn.close()
+            
+            # If no file server is available, return an error message.
+            if result is None:
+                return {
+                    "status": False,
+                    "message": f"Could'nt find an onlinefile server for file '{file_path}'."
+                    }
+        
+        return {
+            "status": True,
+            "message": f"File server found.",
+            "host": result[1],
+            "port": result[2]
+            }
+    
+    
     def exposed_update_file_server_status(self, name, status, token):
         """
         Turns off a file server.

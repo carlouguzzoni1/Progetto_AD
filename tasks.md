@@ -2,7 +2,6 @@
 * Generare database e directories di prova per il progetto, più uno script per caricarle.
 * Scrivere un esempio d'uso sul README.
 # dfs
-* Refactoring con chiave asimmetrica.
 * Operazioni tutti i clients:
     * Download
     * Cancellazione

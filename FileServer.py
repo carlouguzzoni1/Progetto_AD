@@ -168,7 +168,7 @@ class FileServer(rpyc.Service):
             file_data (bytes):      The data of the file to store.
             token (str):            The token of the client.
         Returns:
-            bool:           True if the file is stored successfully, False otherwise.
+            dict:                   A dictionary containing the status of the operation.
         """
         
         # Get the username from the token.
@@ -213,6 +213,54 @@ class FileServer(rpyc.Service):
             print(f"Error storing file '{file_name}': {e}")
             
             return {"status": False, "message": "Error storing file."}
+    
+    
+    def exposed_send_file(self, file_path, token):
+        """
+        Sends a file to the client.
+        Args:
+            file_path (str):    The path of the file to send.
+            token (str):        The token of the client.
+        Returns:
+            dict:               A dictionary containing the file data.
+        """
+        
+        # Get the username from the token.
+        payload = self._get_token_payload(token)
+        
+        if payload is None:
+            return {"status": False, "message": "Error sending file. Corrupted token."}
+        else:
+            username = payload["username"]
+        
+        # Check whether the username applying the request is the same as the owner.
+        # username must be the same as the higher directory in the file path.
+        if os.path.dirname(file_path).split("/")[0] != username:
+            return {
+                "status": False,
+                "message": "User does not own the file. Access denied."
+                }
+        
+        # Combine the root directory with the file path to get the absolute file path.
+        file_path = os.path.join(self.files_dir, file_path)
+        
+        # Check if the absolute path contains dangerous characters (..).
+        if ".." in file_path:
+            return {"status": False, "message": "Invalid file path Access denied."}
+        
+        # Check if the file exists.
+        if not os.path.exists(file_path):
+            return {"status": False, "message": "File not found."}
+        
+        # Read the file data.
+        with open(file_path, "rb") as file:
+            file_data = file.read()
+            
+        return {
+            "status": True,
+            "file_data": file_data,
+            "message": "File received successfully."
+            }
 
 
 
