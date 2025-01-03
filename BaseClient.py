@@ -122,7 +122,7 @@ class BaseClient(ABC):
             # If the operation was successful, print the result.
             if result["status"]:
                 # Convert the result to a list of dictionaries.
-                headers = ["File", "Owner", "Size", "Checksum", "Uploaded at", "Primary Server"]
+                headers = ["File", "Size", "Checksum", "Uploaded at", "Primary Server"]
                 result["files"]  = [dict(zip(headers, row)) for row in result["files"]]
                 
                 MAX_CHECKSUM_LEN = 15
@@ -130,7 +130,6 @@ class BaseClient(ABC):
                 result["files"] = [
                     {
                         "File"          : f["File"],
-                        "Owner"         : f["Owner"],
                         "Size"          : f["Size"],
                         "Checksum"      : utils.truncate(f["Checksum"], MAX_CHECKSUM_LEN),
                         "Uploaded at"   : f["Uploaded at"],
@@ -142,24 +141,31 @@ class BaseClient(ABC):
                 print(tabulate(result["files"], headers="keys"))
     
     
-    def upload_file(self, file_path):
+    def upload_file(self, client_path, server_path):
         """
         Uploads a file into the DFS.
         Args:
-            file_path (str): The name of the file to upload.
+            client_path (str): The absolute path of the file to upload.
+            server_path (str): The directory where the file will be stored.
         """
         
-        # Get file's name and size.
-        file_name    = os.path.basename(file_path)
-        file_size    = os.path.getsize(file_path)
+        # Calculate the checksum of the file.
+        checksum = utils.calculate_checksum(client_path)
+        
+        # Get the file's name and size.
+        file_name   = os.path.basename(client_path)
+        file_size   = os.path.getsize(client_path)
+        
+        # Concatenate the file path with the file name to get the absolute path
+        # server-side.
+        server_path   = os.path.join(server_path, file_name)
         
         # Ask the name server for the file server.
         result      = self.conn.root.get_file_server_upload(
-            utils.generate_uuid(),
-            file_name,
+            server_path,
             self.token,
             file_size,
-            utils.calculate_checksum(file_path)
+            checksum
             )
         
         print(result["message"])
@@ -176,9 +182,13 @@ class BaseClient(ABC):
         fs_conn     = rpyc.connect(fs_host, fs_port)
         
         # Upload the file.
-        with open(file_path, "rb") as file:
+        with open(client_path, "rb") as file:
             file_data = file.read()
-            upload_result = fs_conn.root.store_file(file_name, file_data)
+            upload_result = fs_conn.root.store_file(
+                server_path,
+                file_data,
+                self.token
+                )
             print(upload_result["message"])
         
         # Close the file server connection.
@@ -191,25 +201,7 @@ class BaseClient(ABC):
         if not self.user_is_logged:
             print("You must be logged in to upload a file.")
         else:
-            file_path = input("Insert file path: ")
-            self.upload_file(file_path)
-    
-    
-    def download_file(self, file_name):
-        """
-        Downloads a file from the DFS.
-        Args:
-            file_name (str): The name of the file to download.
-        """
-        
-        pass
-    
-    
-    def download(self):
-        """User interface for downloading a file."""
-        
-        if not self.user_is_logged:
-            print("You must be logged in to download a file.")
-        else:
-            file_name = input("Insert file name: ")
-            self.download_file(file_name)
+            file_name = input("Insert absolute file path: ")
+            server_path = input("Insert the directory where the file will be stored: ")
+            
+            self.upload_file(file_name, server_path)

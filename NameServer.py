@@ -36,6 +36,10 @@ class NameServerService(rpyc.Service):
     #       connessioni attive e vada ad aggiornare il database.
     #       Se il name server viene disconnesso in modo improvviso poco importa,
     #       perché lo stato del database non avrà più importanza a quel punto.
+    # TODO: sostituire i metodi update_client_status e update_file_server_status
+    #       con logout_client (già esistente) ed una controparte per file servers,
+    #       oppure rimpiazzare in toto con il meccanismo di heart-beat descritto
+    #       sopra.
     
     # NOTE: sqlite3 è di default in modalità "serialized", ciò significa che si
     #       possono eseguire più thread in simultanea senza restrizioni.
@@ -95,17 +99,14 @@ class NameServerService(rpyc.Service):
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # Many NOT NULL constraints should be used because most data is mandatory.
-            # Sym-DFS software does still handle all mandatory data inherently.
-            
             # Create users table.
             try:
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS users (
                         username TEXT PRIMARY KEY,
                         password_hash TEXT NOT NULL,
-                        is_root BOOLEAN DEFAULT 0,
-                        is_online BOOLEAN DEFAULT 0
+                        is_root BOOLEAN NOT NULL DEFAULT 0,
+                        is_online BOOLEAN NOT NULL DEFAULT 0
                     );
                 """)
             except sqlite3.OperationalError as e:
@@ -119,9 +120,9 @@ class NameServerService(rpyc.Service):
                         password_hash TEXT NOT NULL,
                         address TEXT NOT NULL,
                         port INTEGER NOT NULL,
-                        is_online BOOLEAN DEFAULT 0,
-                        size INTEGER,
-                        free_space INTEGER,
+                        is_online BOOLEAN NOT NULL DEFAULT 0,
+                        size INTEGER NOT NULL,
+                        free_space INTEGER NOT NULL,
                         last_heartbeat TIMESTAMP,
                         UNIQUE (address, port)
                     );
@@ -133,12 +134,12 @@ class NameServerService(rpyc.Service):
             try:
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS files (
-                        uuid TEXT PRIMARY KEY,
-                        name TEXT NOT NULL,
+                        file_path TEXT PRIMARY KEY,
+                        file_name TEXT NOT NULL,
                         owner TEXT NOT NULL,
-                        size INTEGER,
-                        checksum TEXT,
-                        primary_server TEXT,
+                        size INTEGER NOT NULL,
+                        checksum TEXT NOT NULL,
+                        primary_server TEXT NOT NULL,
                         uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         FOREIGN KEY (primary_server) REFERENCES file_servers (name),
                         FOREIGN KEY (owner) REFERENCES users (username)
@@ -151,11 +152,11 @@ class NameServerService(rpyc.Service):
             try:
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS replicas (
-                        uuid INTEGER,
-                        server TEXT,
-                        FOREIGN KEY (uuid) REFERENCES files (uuid),
+                        file_path TEXT NOT NULL,
+                        server TEXT NOT NULL,
+                        FOREIGN KEY (file_path) REFERENCES files (file_path),
                         FOREIGN KEY (server) REFERENCES file_servers (name),
-                        PRIMARY KEY (uuid, server)
+                        PRIMARY KEY (file_path, server)
                     );
                 """)
             except sqlite3.OperationalError as e:
@@ -487,7 +488,8 @@ class NameServerService(rpyc.Service):
                 "message": f"File server '{name}' authenticated successfully.",
                 "host": result[2],
                 "port": result[3],
-                "token": token
+                "token": token,
+                "secret_key": self._secret_key
                 }
         
         except sqlite3.OperationalError as e:
@@ -511,6 +513,7 @@ class NameServerService(rpyc.Service):
         Returns:
             str:            A message indicating the result of the operation.
         """
+        # TEST cancellazione utente con files.
         
         conn            = sqlite3.connect(self.db_path)
         cursor          = conn.cursor()
@@ -696,7 +699,7 @@ class NameServerService(rpyc.Service):
         # Get the files owned by the user.
         try:
             cursor.execute("""
-                SELECT name, owner, size, checksum, uploaded_at, primary_server
+                SELECT file_path, size, checksum, uploaded_at, primary_server
                 FROM files
                 WHERE owner = ?
                 """,
@@ -729,19 +732,21 @@ class NameServerService(rpyc.Service):
             conn.close()
     
     
-    def exposed_get_file_server_upload(self, uuid, file_name, token, file_size, checksum):
+    def exposed_get_file_server_upload(self, file_path, token, file_size, checksum):
         """
         Gets the best file server to store a file according to K-least loaded
         policy.
         Args:
-            uuid (str):         The uuid of the file server.
-            file_name (str):    The name of the file.
+            file_path (str):    The absolute path of the file.
             token (str):        The JWT token of the user.
             file_size (int):    The size of the file.
             checksum (str):     The checksum of the file.
         Returns:
             dict:               A dictionary containing the file server information.
         """
+        
+        # Get the file's name.
+        file_name = os.path.basename(file_path)
         
         K = 3
         
@@ -827,16 +832,19 @@ class NameServerService(rpyc.Service):
         else:
             username = payload["username"]
         
+        # Add the username as base directory for the file.
+        file_path = os.path.join(username, file_path)
+        
         # Create new entry into the files table.
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
         try:
             cursor.execute("""
-                INSERT INTO files (uuid, name, owner, size, checksum, primary_server)
+                INSERT INTO files (file_path, file_name, owner, size, checksum, primary_server)
                 VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (uuid, file_name, username, file_size, checksum, best_file_server[0])
+                (file_path, file_name, username, file_size, checksum, best_file_server[0])
                 )
             conn.commit()
         
@@ -852,10 +860,10 @@ class NameServerService(rpyc.Service):
         
         try:
             cursor.execute("""
-                INSERT INTO replicas (uuid, server)
+                INSERT INTO replicas (file_path, server)
                 VALUES (?, ?)
                 """,
-                (uuid, best_file_server[0])
+                (file_path, best_file_server[0])
                 )
             conn.commit()
         
@@ -864,7 +872,6 @@ class NameServerService(rpyc.Service):
         
         finally:
             conn.close()
-        
         
         return {
             "status": True,
