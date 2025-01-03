@@ -13,14 +13,15 @@ class FileServer(rpyc.Service):
     """
     
     def __init__(self, ns_host, ns_port):
-        self.ns_host    = ns_host
-        self.ns_port    = ns_port
-        self.conn       = None
-        self.host       = None
-        self.port       = None
-        self.files_dir  = None
-        self.name       = None
-        self.token      = None
+        self.ns_host        = ns_host
+        self.ns_port        = ns_port
+        self.conn           = None
+        self.host           = None
+        self.port           = None
+        self.files_dir      = None
+        self.name           = None
+        self.token          = None
+        self._public_key    = None
     
     
     def __del__(self):
@@ -53,7 +54,7 @@ class FileServer(rpyc.Service):
         """
         
         try:
-            payload = jwt.decode(token, self.secret_key, algorithms=["HS256"])
+            payload = jwt.decode(token, self._public_key, algorithms=["RS384"])
         
         except jwt.InvalidTokenError as e:
             print("Error decoding JWT token:", e)
@@ -122,7 +123,7 @@ class FileServer(rpyc.Service):
             self.files_dir  = "./FS/{}".format(name)
             self.name       = name
             self.token      = result["token"]
-            self.secret_key = result["secret_key"]
+            self._public_key = result["public_key"]
             
             # Check whether the file server actually has a local storage directory associated.
             if not os.path.exists(self.files_dir):
@@ -194,14 +195,12 @@ class FileServer(rpyc.Service):
         # Create the directories (if needed).
         for directory in directories[:-1]:
             dir = os.path.join(dir, directory)
-            print(dir)
             
             if not os.path.exists(dir):
                 os.mkdir(dir)
         
         # Create the new file path.
         file_path = os.path.join(dir, file_name)
-        print(file_path)
         
         # Try to store the file.
         try:

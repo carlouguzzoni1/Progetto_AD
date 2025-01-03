@@ -5,6 +5,8 @@ import rpyc
 from bcrypt import hashpw, gensalt, checkpw
 import jwt
 import secrets
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives import serialization
 
 
 
@@ -15,7 +17,22 @@ SERVER_PORT     = 18861
 # NOTE: i parametri di sicurezza vengono impostati come variabili globali per
 #       semplicità. Nonappena possibile si migrerà verso l'uso di variabili
 #       d'ambiente o file di configurazione protetti.
-SECRET_KEY      = secrets.token_urlsafe(64)
+PRIVATE_KEY      = rsa.generate_private_key(
+    public_exponent=65537,
+    key_size=2048
+)
+PUBLIC_KEY      = PRIVATE_KEY.public_key()
+PRIVATE_KEY     = PRIVATE_KEY.private_bytes(    # Private key for JWT tokens.
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption()   # No password for simplicity.
+            ).decode("utf-8")
+print(PRIVATE_KEY)
+PUBLIC_KEY      = PUBLIC_KEY.public_bytes(      # Public key for JWT tokens.
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+            ).decode("utf-8")
+print(PUBLIC_KEY)
 ROOT_PASSPHRASE = "sym-DFS-project"
 
 
@@ -71,7 +88,8 @@ class NameServerService(rpyc.Service):
     def __init__(self, host="localhost", port=SERVER_PORT):
         self.db_path            = DB_PATH
         self.server_port        = port
-        self._secret_key        = SECRET_KEY        # Secret key for JWT tokens.
+        self._private_key       = PRIVATE_KEY       # Private key for JWT tokens.
+        self._public_key        = PUBLIC_KEY        # Public key for JWT tokens.
         self._root_passphrase   = ROOT_PASSPHRASE   # Root passphrase for creating root users.
         
         self._setup_database()
@@ -182,7 +200,7 @@ class NameServerService(rpyc.Service):
             "username": user_id,
             "role":     role
         }
-        token = jwt.encode(payload, self._secret_key, algorithm="HS256")
+        token = jwt.encode(payload, self._private_key, algorithm="RS384")
         
         return token
     
@@ -197,7 +215,7 @@ class NameServerService(rpyc.Service):
         """
         
         try:
-            payload = jwt.decode(token, self._secret_key, algorithms=["HS256"])
+            payload = jwt.decode(token, self._public_key, algorithms=["RS384"])
         
         except jwt.InvalidTokenError as e:
             print("Error decoding JWT token:", e)
@@ -489,7 +507,7 @@ class NameServerService(rpyc.Service):
                 "host": result[2],
                 "port": result[3],
                 "token": token,
-                "secret_key": self._secret_key
+                "public_key": self._public_key
                 }
         
         except sqlite3.OperationalError as e:
@@ -966,7 +984,7 @@ class NameServerService(rpyc.Service):
         # Update the client's status.
         try:
             cursor.execute("""
-                UPDATE clients
+                UPDATE users
                 SET is_online = ?
                 WHERE username = ?  
                 """,
