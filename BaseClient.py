@@ -150,7 +150,7 @@ class BaseClient(ABC):
         """
         
         # Calculate the checksum of the file.
-        checksum = utils.calculate_checksum(client_path)
+        checksum    = utils.calculate_checksum(client_path)
         
         # Get the file's name and size.
         file_name   = os.path.basename(client_path)
@@ -158,7 +158,7 @@ class BaseClient(ABC):
         
         # Concatenate the file path with the file name to get the absolute path
         # server-side.
-        server_path   = os.path.join(server_path, file_name)
+        server_path = os.path.join(server_path, file_name)
         
         # Ask the name server for the file server.
         result      = self.conn.root.get_file_server_upload(
@@ -201,7 +201,67 @@ class BaseClient(ABC):
         if not self.user_is_logged:
             print("You must be logged in to upload a file.")
         else:
-            file_name = input("Insert absolute file path: ")
+            file_name   = input("Insert absolute file path: ")
             server_path = input("Insert the directory where the file will be stored: ")
             
             self.upload_file(file_name, server_path)
+    
+    
+    def download_file(self, server_path):
+        """
+        Downloads a file from the DFS.
+        Args:
+            server_path (str): The absolute path of the file to download on the DFS.
+        """
+        
+        result      = self.conn.root.get_file_server_download(server_path, self.token)
+        
+        print(result["message"])
+        
+        # If a file server was not found or an error occured, exit.
+        if not result["status"]:
+            return
+        
+        # Get the file server's host and port.
+        fs_host     = result["host"]
+        fs_port     = result["port"]
+        
+        # Connect to the file server.
+        fs_conn     = rpyc.connect(fs_host, fs_port)
+        
+        # Get the file name.
+        file_name   = os.path.basename(server_path)
+        
+        # Create all the directories to store the file.
+        dir         = self.files_dir
+        
+        for directory in server_path.split("/")[1:-1]:
+            dir         = os.path.join(dir, directory)
+            
+            if not os.path.exists(dir):
+                os.mkdir(dir)
+        
+        # Concatenate the file path with the file name to get the absolute path
+        # client-side.
+        client_path = os.path.join(dir, file_name)
+        
+        # Download the file.
+        with open(client_path, "wb") as file:
+            result = fs_conn.root.send_file(server_path, self.token)
+            
+            print(result["message"])
+            file.write(result["file_data"])
+        
+        # Close the file server connection.
+        fs_conn.close()
+    
+    
+    def download(self):
+        """User interface for downloading a file."""
+        
+        if not self.user_is_logged:
+            print("You must be logged in to download a file.")
+        else:
+            server_abs_path = input("Insert the absolute path of the file to download: ")
+            
+            self.download_file(server_abs_path)
