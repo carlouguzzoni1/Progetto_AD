@@ -2,6 +2,8 @@ import sys
 from BaseClient import BaseClient
 import os
 from getpass import getpass
+import utils
+from tabulate import tabulate
 
 
 
@@ -92,6 +94,7 @@ class RootClient(BaseClient):
         upload              Upload a file
         download            Download a file
         delete-file         Delete a file
+        list-all-files      List all files in the DFS
         exit                Exit the program
         show-commands       Show commands
         """)
@@ -147,6 +150,37 @@ class RootClient(BaseClient):
             print(result["message"])
     
     
+    def list_all_files(self):
+        """Lists all files in the DFS."""
+        
+        result = self.conn.root.list_all_files(self.token)
+        
+        print(result["message"])
+        
+        # If the operation was successful, print the files.
+        if result["status"]:
+            # Convert the result to a list of dictionaries.
+            headers = ["File", "Size", "Owner", "Checksum", "Uploaded at", "Server"]
+            result["files"]  = [dict(zip(headers, row)) for row in result["files"]]
+            
+            MAX_CHECKSUM_LEN = 15
+            
+            result["files"] = [
+                {
+                    "File"          : f["File"],
+                    "Size"          : f["Size"],
+                    "Owner"         : f["Owner"],
+                    "Checksum"      : utils.truncate(f["Checksum"], MAX_CHECKSUM_LEN),
+                    "Uploaded at"   : f["Uploaded at"],
+                    "Server": f["Server"]
+                }
+                for f in result["files"]
+            ]
+            
+            print(tabulate(result["files"], headers="keys"))
+    
+    
+    
     def main_prompt(self):
         """Displays the main prompt for the root client."""
         
@@ -172,6 +206,8 @@ class RootClient(BaseClient):
                     self.download()
                 case "delete-file":
                     self.delete()
+                case "list-all-files":
+                    self.list_all_files()
                 case "exit":
                     print("Exiting...")
                     # Update the user status in the name server's database.

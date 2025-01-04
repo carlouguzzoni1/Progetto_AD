@@ -30,16 +30,14 @@ PUBLIC_KEY      = PRIVATE_KEY.public_key()
 
 # Convert keys to strings.
 PRIVATE_KEY     = PRIVATE_KEY.private_bytes(                    # Private key for JWT tokens.
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PrivateFormat.PKCS8,
-            encryption_algorithm=serialization.NoEncryption()   # No password for simplicity.
-            ).decode("utf-8")
-print(PRIVATE_KEY)
+    encoding=serialization.Encoding.PEM,
+    format=serialization.PrivateFormat.PKCS8,
+    encryption_algorithm=serialization.NoEncryption()           # No password for simplicity.
+    ).decode("utf-8")
 PUBLIC_KEY      = PUBLIC_KEY.public_bytes(                      # Public key for JWT tokens.
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PublicFormat.SubjectPublicKeyInfo
-            ).decode("utf-8")
-print(PUBLIC_KEY)
+    encoding=serialization.Encoding.PEM,
+    format=serialization.PublicFormat.SubjectPublicKeyInfo
+    ).decode("utf-8")
 
 # Root passphrase for creating root users.
 ROOT_PASSPHRASE = "sym-DFS-project"
@@ -1017,6 +1015,32 @@ class NameServerService(rpyc.Service):
         else:
             username = payload["username"]
         
+        # Delete the file from the replicas table.
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                DELETE FROM replicas
+                WHERE file_path = ?
+                AND ? = (
+                    SELECT owner
+                    FROM files
+                    WHERE file_path = ?
+                )
+                """,
+                (file_path, username, file_path)
+                )
+            conn.commit()
+        
+        except sqlite3.OperationalError as e:
+            print(f"Error deleting record for replica of file:", e)
+            
+            return f"Error deleting replicas of file '{file_path}'."
+        
+        finally:
+            conn.close()
+        
         # Delete the file from the files table.
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
@@ -1040,6 +1064,63 @@ class NameServerService(rpyc.Service):
             conn.close()
         
         return f"File '{file_path}' deleted."
+    
+    
+    def exposed_list_all_files(self, token):
+        """
+        Lists all files in the DFS.
+        Args:
+            token (str):    The token of the requestor.
+        Returns:
+            list:           A list of dictionaries containing the file information.
+        """
+        
+        # Get the client's role from the token.
+        payload = self._get_token_payload(token)
+        
+        if payload is None:
+            return {
+                "status": False,
+                "message": "Error listing files. Corrupted token."
+                }
+        else:
+            role = payload["role"]
+        
+        # Check the role of the client.
+        if role != "root":
+            return {
+                "status": False,
+                "message": "Error listing files. Only admin can list files."
+                }
+        
+        # Get the metadata of all files in the DFS.
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                SELECT f.file_path, f.size, f.owner, f.checksum, f.uploaded_at, r.server
+                FROM files AS f
+                JOIN replicas AS r ON f.file_path = r.file_path
+                """)
+            result = cursor.fetchall()
+        
+        except sqlite3.OperationalError as e:
+            print(f"Error selecting records for files:", e)
+            
+            return {
+                "status:": False,
+                "message": "Error listing files."
+                }
+        
+        finally:
+            conn.close()
+        
+        return {
+            "status": True,
+            "message": "Listing files",
+            "files": result
+            }
     
     
     def exposed_update_file_server_status(self, name, status, token):
