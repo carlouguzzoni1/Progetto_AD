@@ -1123,6 +1123,118 @@ class NameServerService(rpyc.Service):
             }
     
     
+    def exposed_list_all_clients(self, token):
+        """
+        Lists all clients in the DFS.
+        Args:
+            token (str):    The token of the requestor.
+        Returns:
+            list:           A list of dictionaries containing the client information.
+        """
+        
+        # Get the client's role from the token.
+        payload = self._get_token_payload(token)
+        
+        if payload is None:
+            return {
+                "status": False,
+                "message": "Error listing clients. Corrupted token."
+                }
+        else:
+            role = payload["role"]
+        
+        # Check the role of the client.
+        if role != "root":
+            return {
+                "status": False,
+                "message": "Error listing clients. Only admin can list clients."
+                }
+        
+        # Get the metadata of all clients in the DFS.
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                SELECT username, is_online
+                FROM users
+                """)
+            result = cursor.fetchall()
+        
+        except sqlite3.OperationalError as e:
+            print(f"Error selecting records for clients:", e)
+            
+            return {
+                "status:": False,
+                "message": "Error listing clients."
+                }
+        
+        finally:
+            conn.close()
+        
+        return {
+            "status": True,
+            "message": "Listing clients",
+            "clients": result
+            }
+    
+    
+    def exposed_list_all_file_servers(self, token):
+        """
+        Lists all file servers in the DFS.
+        Args:
+            token (str):    The token of the requestor.
+        Returns:
+            list:           A list of dictionaries containing the file server information.
+        """
+        
+        # Get the client's role from the token.
+        payload = self._get_token_payload(token)
+        
+        if payload is None:
+            return {
+                "status": False,
+                "message": "Error listing file servers. Corrupted token."
+                }
+        else:
+            role = payload["role"]
+        
+        # Check the role of the client.
+        if role != "root":
+            return {
+                "status": False,
+                "message": "Error listing file servers. Only admin can list file servers."
+                }
+        
+        # Get the metadata of all file servers in the DFS.
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                SELECT name, is_online, address, port, size, free_space
+                FROM file_servers
+                """)
+            result = cursor.fetchall()
+        
+        except sqlite3.OperationalError as e:
+            print(f"Error selecting records for file servers:", e)
+            
+            return {
+                "status:": False,
+                "message": "Error listing file servers."
+                }
+        
+        finally:
+            conn.close()
+        
+        return {
+            "status": True,
+            "message": "Listing file servers",
+            "file_servers": result
+            }
+    
+    
     def exposed_update_file_server_status(self, name, status, token):
         """
         Turns off a file server.

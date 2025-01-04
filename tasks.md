@@ -3,8 +3,6 @@
 * Scrivere un esempio d'uso sul README.
 # dfs
 * Operazioni root client:
-    * Visualizzazione metadati files
-    * Visualizzazione dati clients
     * Visualizzazione dati servers
 * Meccanismi di heart-beat o periodici:
     * Lato-file server:
