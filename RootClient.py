@@ -14,14 +14,6 @@ LOCKFILE_PATH = "./NS/rootclient.lock"
 class RootClient(BaseClient):
     """Client class for root user. Root client is a singleton."""
     
-    # TODO: visualizzazione metadati di tutti i files attualemente nel database
-    #       del name server (dfs).
-    #       Formato: nome | dimensione | proprietario | checksum | server
-    # TODO: visualizzazione dati di tutti i clients (dfs).
-    #       Formato: nome | stato
-    # TODO: visualizzazione dati di tutti i file servers (dfs).
-    #       Formato: nome | stato | indirizzo | porta | dimensione | spazio libero
-    
     # NOTE: la procedura di creazione di un client root utilizza lo stesso metodo
     #       esposto dal file server per la creazione di un client regolare. In
     #       ogni caso, per la creazione di un utente root è richiesta una certa
@@ -95,6 +87,8 @@ class RootClient(BaseClient):
         download            Download a file
         delete-file         Delete a file
         list-all-files      List all files in the DFS
+        list-all-clients    List all clients in the DFS
+        list-all-fs         List all file servers in the DFS
         exit                Exit the program
         show-commands       Show commands
         """)
@@ -180,6 +174,56 @@ class RootClient(BaseClient):
             print(tabulate(result["files"], headers="keys"))
     
     
+    def list_all_clients(self):
+        """Lists all clients in the DFS."""
+        
+        result = self.conn.root.list_all_clients(self.token)
+        
+        print(result["message"])
+        
+        # If the operation was successful, print the clients.
+        if result["status"]:
+            headers             = ["Username", "Is online"]
+            result["clients"]   = [dict(zip(headers, row)) for row in result["clients"]]
+            
+            # Replace the boolean values with "Y" or "N".
+            result["clients"]   = [
+                {
+                    "Username"   : c["Username"],
+                    "Is online"  : "Y" if c["Is online"] else "N"
+                }
+                for c in result["clients"]
+            ]
+            
+            print(tabulate(result["clients"], headers="keys"))
+    
+    
+    def list_all_file_servers(self):
+        """Lists all file servers in the DFS."""
+        
+        result = self.conn.root.list_all_file_servers(self.token)
+        
+        print(result["message"])
+        
+        # If the operation was successful, print the file servers.
+        if result["status"]:
+            headers                 = ["Name", "Is online", "Address", "Port", "Size", "Free space"]
+            result["file_servers"]  = [dict(zip(headers, row)) for row in result["file_servers"]]
+            
+            # Replace the boolean values with "Y" or "N".
+            result["file_servers"] = [
+                {
+                    "Name"          : f["Name"],
+                    "Is online"     : "Y" if f["Is online"] else "N",
+                    "Address"       : f["Address"],
+                    "Port"          : f["Port"],
+                    "Size"          : f["Size"],
+                    "Free space"    : f["Free space"]
+                }
+                for f in result["file_servers"]
+            ]
+            
+            print(tabulate(result["file_servers"], headers="keys"))
     
     def main_prompt(self):
         """Displays the main prompt for the root client."""
@@ -208,6 +252,10 @@ class RootClient(BaseClient):
                     self.delete()
                 case "list-all-files":
                     self.list_all_files()
+                case "list-all-clients":
+                    self.list_all_clients()
+                case "list-all-fs":
+                    self.list_all_file_servers()
                 case "exit":
                     print("Exiting...")
                     # Update the user status in the name server's database.
