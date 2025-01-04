@@ -90,7 +90,8 @@ class RootClient(BaseClient):
         delete-user         Delete a user
         list-files          List files of the root user
         upload              Upload a file
-        turn-off-fs         Logically turn off a file server (maintenance)
+        download            Download a file
+        delete-file         Delete a file
         exit                Exit the program
         show-commands       Show commands
         """)
@@ -166,7 +167,11 @@ class RootClient(BaseClient):
                 case "list-files":
                     self.list_files()
                 case "upload":
-                    self.upload_file()
+                    self.upload()
+                case "download":
+                    self.download()
+                case "delete-file":
+                    self.delete()
                 case "exit":
                     print("Exiting...")
                     # Update the user status in the name server's database.

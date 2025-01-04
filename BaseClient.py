@@ -19,7 +19,8 @@ class BaseClient(ABC):
     #       fatto la stessa persona, ma non si fanno supposizioni sulla località
     #       di tale host. Per questo motivo, il client non si accolla l'onere di
     #       cancellare la directory locale per tale utente, che pur non essendo
-    #       più registrato, potrà ugualmente usufruire dei files che aveva scaricato.
+    #       più registrato, potrà ugualmente usufruire dei files che aveva in
+    #       precedenza scaricato.
     
     def __init__(self, host, port):
         """Initializes the client.
@@ -265,3 +266,26 @@ class BaseClient(ABC):
             server_abs_path = input("Insert the absolute path of the file to download: ")
             
             self.download_file(server_abs_path)
+    
+    
+    def delete_file(self, server_path):
+        """
+        Deletes a file from the DFS.
+        Args:
+            server_path (str): The absolute path of the file to delete.
+        """
+        
+        result = self.conn.root.delete_file(server_path, self.token)
+        
+        print(result)
+    
+    
+    def delete(self):
+        """User interface for deleting a file."""
+        
+        if not self.user_is_logged:
+            print("You must be logged in to delete a file.")
+        else:
+            server_abs_path = input("Insert the absolute path of the file to delete: ")
+            
+            self.delete_file(server_abs_path)

@@ -10,29 +10,38 @@ from cryptography.hazmat.primitives import serialization
 
 
 
+# NOTE: la porta del server ed i percorsi di database e lockfile dovrebbero
+#       essere spostati su variabili d'ambiente o files di configurazione.
+
 LOCKFILE_PATH   = "./NS/nameserver.lock"
 DB_PATH         = "./NS/NS.db"
 SERVER_PORT     = 18861
 
 # NOTE: i parametri di sicurezza vengono impostati come variabili globali per
-#       semplicità. Nonappena possibile si migrerà verso l'uso di variabili
-#       d'ambiente o file di configurazione protetti.
+#       semplicità. Nonappena possibile si migrerà verso altri meccanismo, come
+#       detto sopra.
+
+# Generate private and public keys.
 PRIVATE_KEY      = rsa.generate_private_key(
     public_exponent=65537,
     key_size=2048
 )
 PUBLIC_KEY      = PRIVATE_KEY.public_key()
-PRIVATE_KEY     = PRIVATE_KEY.private_bytes(    # Private key for JWT tokens.
+
+# Convert keys to strings.
+PRIVATE_KEY     = PRIVATE_KEY.private_bytes(                    # Private key for JWT tokens.
             encoding=serialization.Encoding.PEM,
             format=serialization.PrivateFormat.PKCS8,
             encryption_algorithm=serialization.NoEncryption()   # No password for simplicity.
             ).decode("utf-8")
 print(PRIVATE_KEY)
-PUBLIC_KEY      = PUBLIC_KEY.public_bytes(      # Public key for JWT tokens.
+PUBLIC_KEY      = PUBLIC_KEY.public_bytes(                      # Public key for JWT tokens.
             encoding=serialization.Encoding.PEM,
             format=serialization.PublicFormat.SubjectPublicKeyInfo
             ).decode("utf-8")
 print(PUBLIC_KEY)
+
+# Root passphrase for creating root users.
 ROOT_PASSPHRASE = "sym-DFS-project"
 
 
@@ -990,6 +999,47 @@ class NameServerService(rpyc.Service):
             "host": result[1],
             "port": result[2]
             }
+    
+    
+    def exposed_delete_file(self, file_path, token):
+        """
+        Deletes a file from the DFS.
+        Args:
+            file_path (str):    The path of the file in the DFS.
+            token (str):        The token of the requestor.
+        """
+        
+        # Get the username from the token.
+        payload = self._get_token_payload(token)
+        
+        if payload is None:
+            return f"Error deleting file. Corrupted token."
+        else:
+            username = payload["username"]
+        
+        # Delete the file from the files table.
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                DELETE FROM files
+                WHERE file_path = ?
+                AND owner = ?
+                """,
+                (file_path, username)
+                )
+            conn.commit()
+        
+        except sqlite3.OperationalError as e:
+            print(f"Error deleting record for file:", e)
+            
+            return f"Error deleting file '{file_path}'."
+        
+        finally:
+            conn.close()
+        
+        return f"File '{file_path}' deleted."
     
     
     def exposed_update_file_server_status(self, name, status, token):

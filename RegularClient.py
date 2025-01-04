@@ -37,6 +37,7 @@ class RegularClient(BaseClient):
         list-files          List files of the user
         upload              Upload a file
         download            Download a file
+        delete-file         Delete a file
         exit                Exit the program
         show-commands       Show commands
         """)
@@ -111,6 +112,8 @@ class RegularClient(BaseClient):
                     self.upload()
                 case "download":
                     self.download()
+                case "delete-file":
+                    self.delete()
                 case "exit":
                     print("Exiting...")
                     # Log out before exiting.
