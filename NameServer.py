@@ -60,6 +60,7 @@ class NameServerService(rpyc.Service):
     #       connessioni attive e vada ad aggiornare il database.
     #       Se il name server viene disconnesso in modo improvviso poco importa,
     #       perché lo stato del database non avrà più importanza a quel punto.
+    
     # TODO: sostituire i metodi update_client_status e update_file_server_status
     #       con logout_client (già esistente) ed una controparte per file servers,
     #       oppure rimpiazzare in toto con il meccanismo di heart-beat descritto
@@ -1337,6 +1338,102 @@ class NameServerService(rpyc.Service):
         
         finally:
             conn.close()
+
+
+def periodic_replication_job(K):
+    """
+    Periodically replicates the files in the DFS up to K times.
+    Args:
+        K (int):    The number of times to replicate the files.
+    """
+    
+    conn    = sqlite3.connect(DB_PATH)
+    cursor  = conn.cursor()
+    
+    # Select the files that need to be replicated and their primary server.
+    try:
+        cursor.execute("""
+            SELECT 
+                f.file_path,
+                COUNT(r.server) as active_replicas
+            FROM files AS f
+            JOIN replicas AS r ON f.file_path = r.file_path
+            JOIN file_servers AS fs ON r.server = fs.name
+            WHERE fs.is_active = 1
+            GROUP BY f.file_path
+            HAVING active_replicas < ?
+            """,
+            (K, )
+            )
+        files_to_replicate = cursor.fetchall()
+    
+    except sqlite3.OperationalError as e:
+        print(f"Error selecting records for replication:", e)
+    
+    finally:
+        conn.close()
+    
+    # For every file that needs to be replicated.
+    for file_path, active_replicas in files_to_replicate:
+        conn    = sqlite3.connect(DB_PATH)
+        cursor  = conn.cursor()
+        
+        # Select address and port of the primary server.
+        try:
+            cursor.execute("""
+                SELECT address, port
+                FROM file_servers AS fs
+                JOIN files AS f ON fs.name = f.primary_server
+                WHERE f.file_path = ?
+                """,
+                (file_path, )
+                )
+            primary_server = cursor.fetchone()
+        
+        except sqlite3.OperationalError as e:
+            print(f"Error selecting record for file '{file_path}':", e)
+        
+        finally:
+            conn.close()
+        
+        conn    = sqlite3.connect(DB_PATH)
+        cursor  = conn.cursor()
+        
+        # Select address and port of the file servers which don't have the file,
+        # up to (K - active_replicas).
+        try:
+            cursor.execute("""
+                SELECT fs.address, fs.port
+                FROM file_servers AS fs
+                WHERE fs.name NOT IN (
+                    SELECT server
+                    FROM replicas
+                    JOIN files ON replicas.file_path = files.file_path
+                    WHERE file_path = ?
+                    )
+                AND fs.is_active = 1
+                LIMIT ?
+                """,
+                (file_path, K - active_replicas)
+                )
+            file_servers = cursor.fetchall()
+        
+        except sqlite3.OperationalError as e:
+            print(f"Error selecting record for file '{file_path}':", e)
+        
+        finally:
+            conn.close()
+        
+        # Send, if possible, other file servers' coordinate to the primary server.
+        if file_servers:
+            # Connect to the primary server.
+            server = rpyc.connect(primary_server[0], primary_server[1])
+            
+            # Send the replication request.
+            server.root.send_file_replicas(file_path, file_servers)
+        else:
+            print(f"Unable to send replication request for file '{file_path}'.")
+
 
 
 if __name__ == "__main__":

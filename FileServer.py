@@ -179,6 +179,11 @@ class FileServer(rpyc.Service):
         else:
             username = payload["username"]
         
+        # TODO: sostituire ovunque la verifica di correttezza del token con
+        #       "if payload is None".
+        # TODO: rimuovere l'aggiunta della user_basedir, così che questa funzione
+        #       sia compatibile anche con l'invio di repliche.
+        
         # Check whether there is already a base directory for the username.
         user_basedir = os.path.join(self.files_dir, username)
         
@@ -261,6 +266,30 @@ class FileServer(rpyc.Service):
             "file_data": file_data,
             "message": "File received successfully."
             }
+    
+    
+    def exposed_send_file_replicas(self, file_path, file_servers):
+        """
+        Sends a file to a list of file servers.
+        Args:
+            file_path (str):        The path of the file to send.
+            file_servers (list):    A list of file servers to send the file to.
+        """
+        
+        # Iterate through the file servers and send the file.
+        for server in file_servers:
+            # Connect to the file server. server is a list of tuples.
+            fs_conn         = rpyc.connect(server[0], server[1])
+            
+            # Add the base directory to the file path.
+            abs_file_path   = os.path.join(self.files_dir, file_path)
+            
+            # Send the replica to the file server.
+            with open(abs_file_path, "rb") as file:
+                file_data   = file.read()
+                result      = fs_conn.root.store_file(file_path, file_data, self.token)
+                
+                print(result["message"])
 
 
 
