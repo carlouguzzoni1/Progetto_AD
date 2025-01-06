@@ -1,12 +1,14 @@
+import rpyc.lib
+from rpyc.utils.server import ThreadedServer
 import os
 import random
 import sqlite3
 import rpyc
 from bcrypt import hashpw, gensalt, checkpw
 import jwt
-import secrets
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
+import threading
 
 
 
@@ -1359,7 +1361,7 @@ def periodic_replication_job(K):
             FROM files AS f
             JOIN replicas AS r ON f.file_path = r.file_path
             JOIN file_servers AS fs ON r.server = fs.name
-            WHERE fs.is_active = 1
+            WHERE fs.is_online = 1
             GROUP BY f.file_path
             HAVING active_replicas < ?
             """,
@@ -1411,7 +1413,7 @@ def periodic_replication_job(K):
                     JOIN files ON replicas.file_path = files.file_path
                     WHERE file_path = ?
                     )
-                AND fs.is_active = 1
+                AND fs.is_online = 1
                 LIMIT ?
                 """,
                 (file_path, K - active_replicas)
@@ -1426,21 +1428,35 @@ def periodic_replication_job(K):
         
         # Send, if possible, other file servers' coordinate to the primary server.
         if file_servers:
-            # Connect to the primary server.
-            server = rpyc.connect(primary_server[0], primary_server[1])
-            
-            # Send the replication request.
-            server.root.send_file_replicas(file_path, file_servers)
+            # Try to connect to the primary server.
+            try:
+                server = rpyc.connect(primary_server[0], primary_server[1])
+                server.root.send_file_replicas(file_path, file_servers)
+            except Exception as e:
+                print(f"Unable to connect to primary server: {e}.")
+                continue
         else:
             print(f"Unable to send replication request for file '{file_path}'.")
 
 
 
 if __name__ == "__main__":
-    from rpyc.utils.server import ThreadedServer
-    
-    server = ThreadedServer(NameServerService, port=SERVER_PORT)
-    
     print("Welcome to sym-DFS Project Server.")
+    
+    # Mantain K replicas.
+    K = 2
+    
+    # Start the replication job in a separate thread.
+    replication_thread = threading.Thread(
+        target=periodic_replication_job(K),
+        daemon=True
+        )
+    
+    print("Starting periodic replication job...")
+    replication_thread.start()
+    
+    # Start the name server.
+    server = ThreadedServer(NameServerService, port=SERVER_PORT)
+        
     print("Starting name server...")
     server.start()

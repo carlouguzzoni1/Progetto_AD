@@ -171,28 +171,17 @@ class FileServer(rpyc.Service):
             dict:                   A dictionary containing the status of the operation.
         """
         
-        # Get the username from the token.
+        # Verify the token.
         payload = self._get_token_payload(token)
         
         if payload is None:
             return {"status": False, "message": "Error storing file. Corrupted token."}
-        else:
-            username = payload["username"]
         
-        # TODO: sostituire ovunque la verifica di correttezza del token con
-        #       "if payload is None".
-        # TODO: rimuovere l'aggiunta della user_basedir, così che questa funzione
-        #       sia compatibile anche con l'invio di repliche.
-        
-        # Check whether there is already a base directory for the username.
-        user_basedir = os.path.join(self.files_dir, username)
-        
-        if not os.path.exists(user_basedir):
-            os.mkdir(user_basedir)
+        # Get the base directory in the file server storage.
+        dir         = self.files_dir
         
         # Split the file path into directories.
         directories = file_path.split("/")
-        dir         = user_basedir
         
         # Get the file name.
         file_name = os.path.basename(file_path)
