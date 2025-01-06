@@ -8,7 +8,6 @@ from bcrypt import hashpw, gensalt, checkpw
 import jwt
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
-import threading
 from apscheduler.schedulers.background import BackgroundScheduler
 
 
@@ -109,8 +108,6 @@ class NameServerService(rpyc.Service):
     
     
     def __init__(self, host=SERVER_HOST, port=SERVER_PORT):
-        # FIXME: cambiare tutti i controlli rispetto lo host del name server da
-        #       "localhost"/"127.0.0.1" a self.host.
         self.server_host        = host              # Host for the name server.
         self.server_port        = port              # Port for the name server.
         self.db_path            = DB_PATH           # Local path to the database.
@@ -136,89 +133,95 @@ class NameServerService(rpyc.Service):
         """
         Creates the nameserver's database (if it doesn't exist) and initializes it.
         """
+        # NOTE: la creazione del database potrebbe anche essere svolta (sempre
+        #       se necessario) al lancio del server nella funzione __main__.
         
         if os.path.exists(DB_PATH):
             print("Database already exists.")
-        else:
-            # Create the database.
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
             
-            # Create users table.
-            try:
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS users (
-                        username TEXT PRIMARY KEY,
-                        password_hash TEXT NOT NULL,
-                        is_root BOOLEAN NOT NULL DEFAULT 0,
-                        is_online BOOLEAN NOT NULL DEFAULT 0
-                    );
-                """)
-            except sqlite3.OperationalError as e:
-                print("Error creating users table:", e)
-            
-            # Create file servers table.
-            try:
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS file_servers (
-                        name TEXT PRIMARY KEY,
-                        password_hash TEXT NOT NULL,
-                        address TEXT NOT NULL,
-                        port INTEGER NOT NULL,
-                        is_online BOOLEAN NOT NULL DEFAULT 0,
-                        size INTEGER NOT NULL,
-                        free_space INTEGER NOT NULL,
-                        last_heartbeat TIMESTAMP,
-                        UNIQUE (address, port)
-                    );
-                """)
-            except sqlite3.OperationalError as e:
-                print("Error creating file servers table:", e)
-            
-            # Create files table.
-            try:
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS files (
-                        file_path TEXT PRIMARY KEY,
-                        file_name TEXT NOT NULL,
-                        owner TEXT NOT NULL,
-                        size INTEGER NOT NULL,
-                        checksum TEXT NOT NULL,
-                        primary_server TEXT NOT NULL,
-                        uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        FOREIGN KEY (primary_server) REFERENCES file_servers (name),
-                        FOREIGN KEY (owner) REFERENCES users (username)
-                    );
-                """)
-            except sqlite3.OperationalError as e:
-                print("Error creating files table:", e)
-            
-            # Create replicas table.
-            try:
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS replicas (
-                        file_path TEXT NOT NULL,
-                        server TEXT NOT NULL,
-                        FOREIGN KEY (file_path) REFERENCES files (file_path),
-                        FOREIGN KEY (server) REFERENCES file_servers (name),
-                        PRIMARY KEY (file_path, server)
-                    );
-                """)
-            except sqlite3.OperationalError as e:
-                print("Error creating replicas table:", e)
-            
-            conn.commit()            
-            conn.close()
-            
-            print("Database created.")
+            return
+        
+        # Create the database.
+        print("Creating name server database...")
+        
+        conn    = sqlite3.connect(self.db_path)
+        cursor  = conn.cursor()
+        
+        # Create users table.
+        try:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    username TEXT PRIMARY KEY,
+                    password_hash TEXT NOT NULL,
+                    is_root BOOLEAN NOT NULL DEFAULT 0,
+                    is_online BOOLEAN NOT NULL DEFAULT 0
+                );
+            """)
+        except sqlite3.OperationalError as e:
+            print("Error creating users table:", e)
+        
+        # Create file servers table.
+        try:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS file_servers (
+                    name TEXT PRIMARY KEY,
+                    password_hash TEXT NOT NULL,
+                    address TEXT NOT NULL,
+                    port INTEGER NOT NULL,
+                    is_online BOOLEAN NOT NULL DEFAULT 0,
+                    size INTEGER NOT NULL,
+                    free_space INTEGER NOT NULL,
+                    last_heartbeat TIMESTAMP,
+                    UNIQUE (address, port)
+                );
+            """)
+        except sqlite3.OperationalError as e:
+            print("Error creating file servers table:", e)
+        
+        # Create files table.
+        try:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS files (
+                    file_path TEXT PRIMARY KEY,
+                    file_name TEXT NOT NULL,
+                    owner TEXT NOT NULL,
+                    size INTEGER NOT NULL,
+                    checksum TEXT NOT NULL,
+                    primary_server TEXT NOT NULL,
+                    uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (primary_server) REFERENCES file_servers (name),
+                    FOREIGN KEY (owner) REFERENCES users (username)
+                );
+            """)
+        except sqlite3.OperationalError as e:
+            print("Error creating files table:", e)
+        
+        # Create replicas table.
+        try:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS replicas (
+                    file_path TEXT NOT NULL,
+                    server TEXT NOT NULL,
+                    FOREIGN KEY (file_path) REFERENCES files (file_path),
+                    FOREIGN KEY (server) REFERENCES file_servers (name),
+                    PRIMARY KEY (file_path, server)
+                );
+            """)
+        except sqlite3.OperationalError as e:
+            print("Error creating replicas table:", e)
+        
+        conn.commit()            
+        conn.close()
+        
+        print("Database created.")
     
     
     def _generate_token(self, user_id, role):
         """
-        Generates a JWT token for the client.
+        Generates a JWT token for clients and file servers.
         Args:
-            user_id (str):  The username of the user.
-            role (str):     The role of the user.
+            user_id (str):  The username or the server name.
+            role (str):     The role of the entity.
         Returns:
             str:            The generated JWT token.
         """
@@ -272,8 +275,8 @@ class NameServerService(rpyc.Service):
         # Check if someone unauthorized is trying to create a root user.
         if is_root and root_passphrase != ROOT_PASSPHRASE:
             return {
-                "status": False,
-                "message": "Invalid root passphrase. Unauthorized action."
+                "status":   False,
+                "message":  "Invalid root passphrase. Unauthorized action."
             }
         
         # Create the user.
@@ -288,16 +291,16 @@ class NameServerService(rpyc.Service):
             conn.commit()
             
             return {
-            "status": True,
-            "message": f"User '{username}' created successfully."
+            "status":   True,
+            "message":  f"User '{username}' created successfully."
             }
         
         except sqlite3.IntegrityError as e:
-            print(f"Error creating user '{username}':", e)
+            print("Error creating user:", e)
             
             return {
-                "status": False,
-                "message": f"Error: user '{username}' already exists."
+                "status":   False,
+                "message":  f"Error: user '{username}' already exists."
                 }
         
         finally:
@@ -321,10 +324,10 @@ class NameServerService(rpyc.Service):
         cursor          = conn.cursor()
         hashed_password = hashpw(password.encode('utf-8'), gensalt())
         
-        # Verify conflicts with the name server.
+        # Verify that there are no conflicts with the name server.
         if host == "localhost" or host == "127.0.0.1":
             if int(port) == self.server_port:
-                return f"Error: File server port {port} conflicts with Name Server port."
+                return f"Error: File server port {port} conflicts with name server port."
         
         # Create the file server.
         try:
@@ -339,7 +342,7 @@ class NameServerService(rpyc.Service):
             return f"File server '{name}' created successfully."
         
         except sqlite3.IntegrityError as e:
-            print(f"Error creating file server '{name}':", e)
+            print("Error creating file server:", e)
             
             return f"Error: file server '{name}' already exists."
         
@@ -349,13 +352,21 @@ class NameServerService(rpyc.Service):
     
     def exposed_authenticate_user(self, username, password):
         """
-        Authenticates a user.
+        Authenticates a user and sends back a JWT token.
         Args:
             username (str): The username of the user.
             password (str): The password of the user.
         Returns:
             dict:           A dictionary containing the result of the operation.
         """
+        # NOTE: sia la creazione che l'autenticazione di un utente root o regolare
+        #       vengono fatte dalle stesse funzioni (per semplicità e risparmio di
+        #       codice). Nella creazione ci siamo serviti della passphrase per
+        #       assicurare un minimo di sicurezza. In questo caso supponiamo
+        #       semplicemente che chi tenta di autenticarsi come root debba conoscere
+        #       le credenziali.
+        # IMPROVE: per rendere il progetto più sicuro si potrebbe implementare un
+        #       massimo di tentativi di accesso.
         
         conn    = sqlite3.connect(self.db_path)
         cursor  = conn.cursor()
@@ -373,22 +384,22 @@ class NameServerService(rpyc.Service):
         
         except sqlite3.OperationalError as e:
             conn.close()
-            print(f"Error selecting record for user '{username}':", e)
+            print("Error selecting record for user:", e)
             
             return {
-                "status": False,
-                "message": f"Error authenticating user '{username}'."
+                "status":   False,
+                "message":  f"Error authenticating user '{username}'."
                 }
         
-        # Check whether login can't be done.
+        ### Check whether login can't be done.
         
         # Check user existence. User must exist.
         if result is None:
             conn.close()
             
             return {
-                "status": False,
-                "message": f"Error: user '{username}' not found."
+                "status":   False,
+                "message":  f"Error: user '{username}' not found."
                 }
         
         # Check user online status. User must not be online.
@@ -396,8 +407,8 @@ class NameServerService(rpyc.Service):
             conn.close()
             
             return {
-                "status": False,
-                "message": f"Error: user '{username}' already logged in."
+                "status":   False,
+                "message":  f"Error: user '{username}' already logged in."
                 }
         
         # Check user password validity. Password must be correct.
@@ -407,11 +418,11 @@ class NameServerService(rpyc.Service):
             conn.close()
             
             return {
-                "status": False,
-                "message": f"Error: wrong password for user '{username}'."
+                "status":   False,
+                "message":  f"Error: wrong password for user '{username}'."
                 }
         
-        # If login can be done (checks passed successfully).
+        ### If the above checks are passed:
         
         # Check user root status. Create a token depending on the root status.
         if result[2]:
@@ -431,17 +442,17 @@ class NameServerService(rpyc.Service):
             conn.commit()
             
             return {
-                "status": True,
-                "message": f"User '{username}' authenticated successfully.",
-                "token": token
+                "status":   True,
+                "message":  f"User '{username}' authenticated successfully.",
+                "token":    token
                 }
         
         except sqlite3.OperationalError as e:
-            print(f"Error updating record for user '{username}':", e)
+            print(f"Error updating record for user:", e)
             
             return {
-                "status": False,
-                "message": f"Error authenticating user '{username}'."
+                "status":   False,
+                "message":  f"Error authenticating user '{username}'."
                 }
         
         finally:
