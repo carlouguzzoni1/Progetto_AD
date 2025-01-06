@@ -171,28 +171,17 @@ class FileServer(rpyc.Service):
             dict:                   A dictionary containing the status of the operation.
         """
         
-        # Get the username from the token.
+        # Verify the token.
         payload = self._get_token_payload(token)
         
         if payload is None:
             return {"status": False, "message": "Error storing file. Corrupted token."}
-        else:
-            username = payload["username"]
         
-        # TODO: sostituire ovunque la verifica di correttezza del token con
-        #       "if payload is None".
-        # TODO: rimuovere l'aggiunta della user_basedir, così che questa funzione
-        #       sia compatibile anche con l'invio di repliche.
-        
-        # Check whether there is already a base directory for the username.
-        user_basedir = os.path.join(self.files_dir, username)
-        
-        if not os.path.exists(user_basedir):
-            os.mkdir(user_basedir)
+        # Get the base directory in the file server storage.
+        dir         = self.files_dir
         
         # Split the file path into directories.
         directories = file_path.split("/")
-        dir         = user_basedir
         
         # Get the file name.
         file_name = os.path.basename(file_path)
@@ -249,10 +238,6 @@ class FileServer(rpyc.Service):
         # Combine the root directory with the file path to get the absolute file path.
         file_path = os.path.join(self.files_dir, file_path)
         
-        # Check if the absolute path contains dangerous characters (..).
-        if ".." in file_path:
-            return {"status": False, "message": "Invalid file path Access denied."}
-        
         # Check if the file exists.
         if not os.path.exists(file_path):
             return {"status": False, "message": "File not found."}
@@ -279,7 +264,7 @@ class FileServer(rpyc.Service):
         # Iterate through the file servers and send the file.
         for server in file_servers:
             # Connect to the file server. server is a list of tuples.
-            fs_conn         = rpyc.connect(server[0], server[1])
+            fs_conn         = rpyc.connect(server[1], server[2])
             
             # Add the base directory to the file path.
             abs_file_path   = os.path.join(self.files_dir, file_path)

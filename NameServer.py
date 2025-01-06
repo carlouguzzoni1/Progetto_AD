@@ -1,43 +1,59 @@
+import rpyc.lib
+from rpyc.utils.server import ThreadedServer
 import os
 import random
 import sqlite3
 import rpyc
 from bcrypt import hashpw, gensalt, checkpw
 import jwt
-import secrets
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
+import threading
+from apscheduler.schedulers.background import BackgroundScheduler
 
 
 
-# NOTE: la porta del server ed i percorsi di database e lockfile dovrebbero
+# IMPROVE: la porta del server ed i percorsi di database e lockfile dovrebbero
 #       essere spostati su variabili d'ambiente o files di configurazione.
 
 LOCKFILE_PATH   = "./NS/nameserver.lock"
 DB_PATH         = "./NS/NS.db"
+SERVER_HOST     = "localhost"
 SERVER_PORT     = 18861
 
-# NOTE: i parametri di sicurezza vengono impostati come variabili globali per
-#       semplicità. Nonappena possibile si migrerà verso altri meccanismo, come
-#       detto sopra.
+# IMPROVE: i parametri di sicurezza vengono impostati come variabili globali per
+#       semplicità. Anche per questi ci si dovrebbe servire di un altro tipo
+#       di meccanismo.
+
+# NOTE: per le interazioni potenzialmente critiche tra client e server, ci si
+#       serve di un sistema di verifica tramite token JWT. Il token è generato
+#       per entrambi clients e file servers. La chiave segreta è RSA a 2048 bit.
+#       La chiave pubblica è distribuita solo ai file servers, ed utilizzata da
+#       name server e file servers per autenticare i token.
 
 # Generate private and public keys.
-PRIVATE_KEY      = rsa.generate_private_key(
-    public_exponent=65537,
-    key_size=2048
+PRIVATE_KEY     = rsa.generate_private_key(
+    public_exponent         = 65537,
+    key_size                = 2048
 )
 PUBLIC_KEY      = PRIVATE_KEY.public_key()
 
 # Convert keys to strings.
-PRIVATE_KEY     = PRIVATE_KEY.private_bytes(                    # Private key for JWT tokens.
-    encoding=serialization.Encoding.PEM,
-    format=serialization.PrivateFormat.PKCS8,
-    encryption_algorithm=serialization.NoEncryption()           # No password for simplicity.
+PRIVATE_KEY     = PRIVATE_KEY.private_bytes(
+    encoding                = serialization.Encoding.PEM,
+    format                  = serialization.PrivateFormat.PKCS8,
+    # No password for simplicity.
+    encryption_algorithm    = serialization.NoEncryption()           
     ).decode("utf-8")
-PUBLIC_KEY      = PUBLIC_KEY.public_bytes(                      # Public key for JWT tokens.
-    encoding=serialization.Encoding.PEM,
-    format=serialization.PublicFormat.SubjectPublicKeyInfo
+PUBLIC_KEY      = PUBLIC_KEY.public_bytes(
+    encoding                = serialization.Encoding.PEM,
+    format                  = serialization.PublicFormat.SubjectPublicKeyInfo
     ).decode("utf-8")
+
+# NOTE: la passphrase è il meccanismo che consente ai root users di potersi
+#       registrare come tali. La verifica della passphrase avviene lato-file
+#       server e ha lo scopo di non permettere in nessun caso ad altri clients
+#       di accedere alla registrazione di root users.
 
 # Root passphrase for creating root users.
 ROOT_PASSPHRASE = "sym-DFS-project"
@@ -55,16 +71,11 @@ class NameServerService(rpyc.Service):
     #       disconnesso in modo improvviso prima che le altre componenti possano
     #       a loro volta disconnettersi in modo sicuro. In casi come questo,
     #       clients e file servers permangono nel database come connessi.
-    #       La soluzione migliore potrebbe essere quella di implementare un
+    # IMPROVE: la soluzione migliore potrebbe essere quella di implementare un
     #       meccanismo di heart-beat, che controlli periodicamente lo stato delle
     #       connessioni attive e vada ad aggiornare il database.
     #       Se il name server viene disconnesso in modo improvviso poco importa,
     #       perché lo stato del database non avrà più importanza a quel punto.
-    
-    # TODO: sostituire i metodi update_client_status e update_file_server_status
-    #       con logout_client (già esistente) ed una controparte per file servers,
-    #       oppure rimpiazzare in toto con il meccanismo di heart-beat descritto
-    #       sopra.
     
     # NOTE: sqlite3 è di default in modalità "serialized", ciò significa che si
     #       possono eseguire più thread in simultanea senza restrizioni.
@@ -77,6 +88,10 @@ class NameServerService(rpyc.Service):
     
     def __new__(cls, *args, **kwargs):
         """Creates a new name server."""
+        
+        # NOTE: questo meccanismo di lock serve a garantire l'effettività del
+        #       design pattern Singleton, dunque l'esistenza di un solo name
+        #       server per l'intero sistema.
         
         if cls._instance is None:
             # Check if name server is already running.
@@ -93,9 +108,12 @@ class NameServerService(rpyc.Service):
         return cls._instance
     
     
-    def __init__(self, host="localhost", port=SERVER_PORT):
-        self.db_path            = DB_PATH
-        self.server_port        = port
+    def __init__(self, host=SERVER_HOST, port=SERVER_PORT):
+        # FIXME: cambiare tutti i controlli rispetto lo host del name server da
+        #       "localhost"/"127.0.0.1" a self.host.
+        self.server_host        = host              # Host for the name server.
+        self.server_port        = port              # Port for the name server.
+        self.db_path            = DB_PATH           # Local path to the database.
         self._private_key       = PRIVATE_KEY       # Private key for JWT tokens.
         self._public_key        = PUBLIC_KEY        # Public key for JWT tokens.
         self._root_passphrase   = ROOT_PASSPHRASE   # Root passphrase for creating root users.
@@ -110,6 +128,7 @@ class NameServerService(rpyc.Service):
         
         # Remove the lock file.
         if os.path.exists(self._lock_file):
+            print("Removing lock file...")
             os.remove(self._lock_file)
     
     
@@ -304,7 +323,7 @@ class NameServerService(rpyc.Service):
         
         # Verify conflicts with the name server.
         if host == "localhost" or host == "127.0.0.1":
-            if port == self.server_port:
+            if int(port) == self.server_port:
                 return f"Error: File server port {port} conflicts with Name Server port."
         
         # Create the file server.
@@ -858,8 +877,19 @@ class NameServerService(rpyc.Service):
         else:
             username = payload["username"]
         
-        # Add the username as base directory for the file.
-        file_path = os.path.join(username, file_path)
+        # Verify that the first directory has the same name as the username.
+        if file_path.split("/")[0] != username:
+            return {
+                "status": False,
+                "message": f"Error sending file. Base directory does not match username."
+                }
+        
+        # Verify that the file path does not contain any '..'.
+        if ".." in file_path:
+            return {
+                "status": False,
+                "message": f"Error sending file. Invalid file path."
+                }
         
         # Create new entry into the files table.
         conn = sqlite3.connect(self.db_path)
@@ -1236,6 +1266,11 @@ class NameServerService(rpyc.Service):
             }
     
     
+    # TODO: sostituire i metodi update_client_status e update_file_server_status
+    #       con logout_client (già esistente) ed una controparte per file servers,
+    #       oppure rimpiazzare in toto con il meccanismo di heart-beat descritto
+    #       sopra.
+    
     def exposed_update_file_server_status(self, name, status, token):
         """
         Turns off a file server.
@@ -1359,13 +1394,17 @@ def periodic_replication_job(K):
             FROM files AS f
             JOIN replicas AS r ON f.file_path = r.file_path
             JOIN file_servers AS fs ON r.server = fs.name
-            WHERE fs.is_active = 1
+            WHERE fs.is_online = 1
             GROUP BY f.file_path
             HAVING active_replicas < ?
             """,
             (K, )
             )
         files_to_replicate = cursor.fetchall()
+        
+        print("RICERCA FILES DA REPLICARE")
+        if files_to_replicate is not None:
+            print("DEBUG. FILES DA REPLICARE:", files_to_replicate)
     
     except sqlite3.OperationalError as e:
         print(f"Error selecting records for replication:", e)
@@ -1396,6 +1435,13 @@ def periodic_replication_job(K):
         finally:
             conn.close()
         
+        # If the primary server is offline, continue.
+        print(f"DEBUG. PRIMARY SERVER: {primary_server}")
+        if not primary_server:
+            print(f"File server is offline. Skipping file '{file_path}'.")
+            
+            continue
+        
         conn    = sqlite3.connect(DB_PATH)
         cursor  = conn.cursor()
         
@@ -1403,15 +1449,15 @@ def periodic_replication_job(K):
         # up to (K - active_replicas).
         try:
             cursor.execute("""
-                SELECT fs.address, fs.port
+                SELECT fs.name, fs.address, fs.port
                 FROM file_servers AS fs
                 WHERE fs.name NOT IN (
                     SELECT server
                     FROM replicas
                     JOIN files ON replicas.file_path = files.file_path
-                    WHERE file_path = ?
+                    WHERE files.file_path = ?
                     )
-                AND fs.is_active = 1
+                AND fs.is_online = 1
                 LIMIT ?
                 """,
                 (file_path, K - active_replicas)
@@ -1424,23 +1470,67 @@ def periodic_replication_job(K):
         finally:
             conn.close()
         
-        # Send, if possible, other file servers' coordinate to the primary server.
-        if file_servers:
-            # Connect to the primary server.
-            server = rpyc.connect(primary_server[0], primary_server[1])
+        print(f"DEBUG. FILE SERVERS: {file_servers}")
+        # If no file servers are available, continue.
+        if not file_servers:
+            print(f"No file servers available. Skipping file '{file_path}'.")
             
-            # Send the replication request.
-            server.root.send_file_replicas(file_path, file_servers)
+            continue
         else:
-            print(f"Unable to send replication request for file '{file_path}'.")
+            # Send, if possible, other file servers' coordinate to the primary server.
+            # Try to connect to the primary server.
+            try:
+                server = rpyc.connect(primary_server[0], primary_server[1])
+                server.root.send_file_replicas(file_path, file_servers)
+                print(f"Replication job for file '{file_path}' completed.")
+            
+            except Exception as e:
+                print(f"Unable to connect to primary server: {e}.")
+                continue
+        
+        # Update the replicas table.
+        conn    = sqlite3.connect(DB_PATH)
+        cursor  = conn.cursor()
+        
+        for file_server in file_servers:
+            try:
+                cursor.execute("""
+                    INSERT INTO replicas (file_path, server)
+                    VALUES (?, ?)
+                    """,
+                    (file_path, file_server[0])
+                    )
+                conn.commit()
+            
+            except sqlite3.OperationalError as e:
+                print(f"Error inserting record for file '{file_path}':", e)
+        
+            finally:
+                conn.close()
 
 
 
 if __name__ == "__main__":
-    from rpyc.utils.server import ThreadedServer
-    
-    server = ThreadedServer(NameServerService, port=SERVER_PORT)
-    
     print("Welcome to sym-DFS Project Server.")
+    
+    # Mantain K replicas.
+    K = 2
+    
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(periodic_replication_job, args=[K], trigger='interval', seconds=30)
+    scheduler.start()
+    
+    # Start the replication job in a separate thread.
+    # replication_thread = threading.Thread(
+    #     target=periodic_replication_job(K),
+    #     daemon=True
+    #     )
+    
+    # print("Starting periodic replication job...")
+    # replication_thread.start()
+    
+    # Start the name server.
+    server = ThreadedServer(NameServerService, port=SERVER_PORT)
+        
     print("Starting name server...")
     server.start()
