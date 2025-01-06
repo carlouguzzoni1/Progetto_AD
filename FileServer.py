@@ -238,10 +238,6 @@ class FileServer(rpyc.Service):
         # Combine the root directory with the file path to get the absolute file path.
         file_path = os.path.join(self.files_dir, file_path)
         
-        # Check if the absolute path contains dangerous characters (..).
-        if ".." in file_path:
-            return {"status": False, "message": "Invalid file path Access denied."}
-        
         # Check if the file exists.
         if not os.path.exists(file_path):
             return {"status": False, "message": "File not found."}
@@ -268,7 +264,7 @@ class FileServer(rpyc.Service):
         # Iterate through the file servers and send the file.
         for server in file_servers:
             # Connect to the file server. server is a list of tuples.
-            fs_conn         = rpyc.connect(server[0], server[1])
+            fs_conn         = rpyc.connect(server[1], server[2])
             
             # Add the base directory to the file path.
             abs_file_path   = os.path.join(self.files_dir, file_path)
