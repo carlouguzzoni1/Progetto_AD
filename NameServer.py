@@ -8,8 +8,8 @@ from bcrypt import hashpw, gensalt, checkpw
 import jwt
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
-import threading
 from apscheduler.schedulers.background import BackgroundScheduler
+import time
 
 
 
@@ -109,8 +109,6 @@ class NameServerService(rpyc.Service):
     
     
     def __init__(self, host=SERVER_HOST, port=SERVER_PORT):
-        # FIXME: cambiare tutti i controlli rispetto lo host del name server da
-        #       "localhost"/"127.0.0.1" a self.host.
         self.server_host        = host              # Host for the name server.
         self.server_port        = port              # Port for the name server.
         self.db_path            = DB_PATH           # Local path to the database.
@@ -136,89 +134,96 @@ class NameServerService(rpyc.Service):
         """
         Creates the nameserver's database (if it doesn't exist) and initializes it.
         """
+        # NOTE: la creazione del database potrebbe anche essere svolta (sempre
+        #       se necessario) al lancio del server nella funzione __main__.
         
         if os.path.exists(DB_PATH):
             print("Database already exists.")
-        else:
-            # Create the database.
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
             
-            # Create users table.
-            try:
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS users (
-                        username TEXT PRIMARY KEY,
-                        password_hash TEXT NOT NULL,
-                        is_root BOOLEAN NOT NULL DEFAULT 0,
-                        is_online BOOLEAN NOT NULL DEFAULT 0
-                    );
-                """)
-            except sqlite3.OperationalError as e:
-                print("Error creating users table:", e)
-            
-            # Create file servers table.
-            try:
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS file_servers (
-                        name TEXT PRIMARY KEY,
-                        password_hash TEXT NOT NULL,
-                        address TEXT NOT NULL,
-                        port INTEGER NOT NULL,
-                        is_online BOOLEAN NOT NULL DEFAULT 0,
-                        size INTEGER NOT NULL,
-                        free_space INTEGER NOT NULL,
-                        last_heartbeat TIMESTAMP,
-                        UNIQUE (address, port)
-                    );
-                """)
-            except sqlite3.OperationalError as e:
-                print("Error creating file servers table:", e)
-            
-            # Create files table.
-            try:
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS files (
-                        file_path TEXT PRIMARY KEY,
-                        file_name TEXT NOT NULL,
-                        owner TEXT NOT NULL,
-                        size INTEGER NOT NULL,
-                        checksum TEXT NOT NULL,
-                        primary_server TEXT NOT NULL,
-                        uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        FOREIGN KEY (primary_server) REFERENCES file_servers (name),
-                        FOREIGN KEY (owner) REFERENCES users (username)
-                    );
-                """)
-            except sqlite3.OperationalError as e:
-                print("Error creating files table:", e)
-            
-            # Create replicas table.
-            try:
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS replicas (
-                        file_path TEXT NOT NULL,
-                        server TEXT NOT NULL,
-                        FOREIGN KEY (file_path) REFERENCES files (file_path),
-                        FOREIGN KEY (server) REFERENCES file_servers (name),
-                        PRIMARY KEY (file_path, server)
-                    );
-                """)
-            except sqlite3.OperationalError as e:
-                print("Error creating replicas table:", e)
-            
-            conn.commit()            
-            conn.close()
-            
-            print("Database created.")
+            return
+        
+        # Create the database.
+        print("Creating name server database...")
+        
+        conn    = sqlite3.connect(self.db_path)
+        cursor  = conn.cursor()
+        
+        # Create users table.
+        try:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    username TEXT PRIMARY KEY,
+                    password_hash TEXT NOT NULL,
+                    is_root BOOLEAN NOT NULL DEFAULT 0,
+                    is_online BOOLEAN NOT NULL DEFAULT 0,
+                    last_heartbeat TIMESTAMP
+                );
+            """)
+        except sqlite3.OperationalError as e:
+            print("Error creating users table:", e)
+        
+        # Create file servers table.
+        try:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS file_servers (
+                    name TEXT PRIMARY KEY,
+                    password_hash TEXT NOT NULL,
+                    address TEXT NOT NULL,
+                    port INTEGER NOT NULL,
+                    is_online BOOLEAN NOT NULL DEFAULT 0,
+                    size INTEGER NOT NULL,
+                    free_space INTEGER NOT NULL,
+                    last_heartbeat TIMESTAMP,
+                    UNIQUE (address, port)
+                );
+            """)
+        except sqlite3.OperationalError as e:
+            print("Error creating file servers table:", e)
+        
+        # Create files table.
+        try:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS files (
+                    file_path TEXT PRIMARY KEY,
+                    file_name TEXT NOT NULL,
+                    owner TEXT NOT NULL,
+                    size INTEGER NOT NULL,
+                    checksum TEXT NOT NULL,
+                    primary_server TEXT NOT NULL,
+                    uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (primary_server) REFERENCES file_servers (name),
+                    FOREIGN KEY (owner) REFERENCES users (username)
+                );
+            """)
+        except sqlite3.OperationalError as e:
+            print("Error creating files table:", e)
+        
+        # Create replicas table.
+        try:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS replicas (
+                    file_path TEXT NOT NULL,
+                    server TEXT NOT NULL,
+                    FOREIGN KEY (file_path) REFERENCES files (file_path),
+                    FOREIGN KEY (server) REFERENCES file_servers (name),
+                    PRIMARY KEY (file_path, server)
+                );
+            """)
+        except sqlite3.OperationalError as e:
+            print("Error creating replicas table:", e)
+        
+        conn.commit()            
+        conn.close()
+        
+        print("Database created.")
     
     
     def _generate_token(self, user_id, role):
         """
-        Generates a JWT token for the client.
+        Generates a JWT token for clients and file servers.
         Args:
-            user_id (str):  The username of the user.
-            role (str):     The role of the user.
+            user_id (str):  The username or the server name.
+            role (str):     The role of the entity.
         Returns:
             str:            The generated JWT token.
         """
@@ -272,8 +277,8 @@ class NameServerService(rpyc.Service):
         # Check if someone unauthorized is trying to create a root user.
         if is_root and root_passphrase != ROOT_PASSPHRASE:
             return {
-                "status": False,
-                "message": "Invalid root passphrase. Unauthorized action."
+                "status":   False,
+                "message":  "Invalid root passphrase. Unauthorized action."
             }
         
         # Create the user.
@@ -288,16 +293,16 @@ class NameServerService(rpyc.Service):
             conn.commit()
             
             return {
-            "status": True,
-            "message": f"User '{username}' created successfully."
+            "status":   True,
+            "message":  f"User '{username}' created successfully."
             }
         
         except sqlite3.IntegrityError as e:
-            print(f"Error creating user '{username}':", e)
+            print("Error creating user:", e)
             
             return {
-                "status": False,
-                "message": f"Error: user '{username}' already exists."
+                "status":   False,
+                "message":  f"Error: user '{username}' already exists."
                 }
         
         finally:
@@ -321,10 +326,10 @@ class NameServerService(rpyc.Service):
         cursor          = conn.cursor()
         hashed_password = hashpw(password.encode('utf-8'), gensalt())
         
-        # Verify conflicts with the name server.
+        # Verify that there are no conflicts with the name server.
         if host == "localhost" or host == "127.0.0.1":
             if int(port) == self.server_port:
-                return f"Error: File server port {port} conflicts with Name Server port."
+                return f"Error: File server port {port} conflicts with name server port."
         
         # Create the file server.
         try:
@@ -339,7 +344,7 @@ class NameServerService(rpyc.Service):
             return f"File server '{name}' created successfully."
         
         except sqlite3.IntegrityError as e:
-            print(f"Error creating file server '{name}':", e)
+            print("Error creating file server:", e)
             
             return f"Error: file server '{name}' already exists."
         
@@ -349,13 +354,21 @@ class NameServerService(rpyc.Service):
     
     def exposed_authenticate_user(self, username, password):
         """
-        Authenticates a user.
+        Authenticates a user and sends back a JWT token.
         Args:
             username (str): The username of the user.
             password (str): The password of the user.
         Returns:
             dict:           A dictionary containing the result of the operation.
         """
+        # NOTE: sia la creazione che l'autenticazione di un utente root o regolare
+        #       vengono fatte dalle stesse funzioni (per semplicità e risparmio di
+        #       codice). Nella creazione ci siamo serviti della passphrase per
+        #       assicurare un minimo di sicurezza. In questo caso supponiamo
+        #       semplicemente che chi tenta di autenticarsi come root debba conoscere
+        #       le credenziali.
+        # IMPROVE: per rendere il progetto più sicuro si potrebbe implementare un
+        #       massimo di tentativi di accesso.
         
         conn    = sqlite3.connect(self.db_path)
         cursor  = conn.cursor()
@@ -373,22 +386,22 @@ class NameServerService(rpyc.Service):
         
         except sqlite3.OperationalError as e:
             conn.close()
-            print(f"Error selecting record for user '{username}':", e)
+            print("Error selecting record for user:", e)
             
             return {
-                "status": False,
-                "message": f"Error authenticating user '{username}'."
+                "status":   False,
+                "message":  f"Error authenticating user '{username}'."
                 }
         
-        # Check whether login can't be done.
+        ### Check whether login can't be done.
         
         # Check user existence. User must exist.
         if result is None:
             conn.close()
             
             return {
-                "status": False,
-                "message": f"Error: user '{username}' not found."
+                "status":   False,
+                "message":  f"Error: user '{username}' not found."
                 }
         
         # Check user online status. User must not be online.
@@ -396,8 +409,8 @@ class NameServerService(rpyc.Service):
             conn.close()
             
             return {
-                "status": False,
-                "message": f"Error: user '{username}' already logged in."
+                "status":   False,
+                "message":  f"Error: user '{username}' already logged in."
                 }
         
         # Check user password validity. Password must be correct.
@@ -407,11 +420,11 @@ class NameServerService(rpyc.Service):
             conn.close()
             
             return {
-                "status": False,
-                "message": f"Error: wrong password for user '{username}'."
+                "status":   False,
+                "message":  f"Error: wrong password for user '{username}'."
                 }
         
-        # If login can be done (checks passed successfully).
+        ### If the above checks are passed:
         
         # Check user root status. Create a token depending on the root status.
         if result[2]:
@@ -423,7 +436,8 @@ class NameServerService(rpyc.Service):
         try:
             cursor.execute("""
                 UPDATE users
-                SET is_online = 1
+                SET is_online = 1,
+                last_heartbeat = CURRENT_TIMESTAMP
                 WHERE username = ?
                 """,
                 (username,)
@@ -431,21 +445,24 @@ class NameServerService(rpyc.Service):
             conn.commit()
             
             return {
-                "status": True,
-                "message": f"User '{username}' authenticated successfully.",
-                "token": token
+                "status":   True,
+                "message":  f"User '{username}' authenticated successfully.",
+                "token":    token
                 }
         
         except sqlite3.OperationalError as e:
-            print(f"Error updating record for user '{username}':", e)
+            print(f"Error updating record for user:", e)
             
             return {
-                "status": False,
-                "message": f"Error authenticating user '{username}'."
+                "status":   False,
+                "message":  f"Error authenticating user '{username}'."
                 }
         
         finally:
             conn.close()
+    
+    
+    # REVISIONE DEL CODICE OK FINO QUA! <-----
     
     
     def exposed_authenticate_file_server(self, name, password):
@@ -521,7 +538,8 @@ class NameServerService(rpyc.Service):
         try:
             cursor.execute("""
                 UPDATE file_servers
-                SET is_online = 1
+                SET is_online = 1,
+                last_heartbeat = CURRENT_TIMESTAMP
                 WHERE name = ?
                 """,
                 (name,)
@@ -1373,7 +1391,62 @@ class NameServerService(rpyc.Service):
         
         finally:
             conn.close()
+    
+    
+    def exposed_activity_heartbeat(self, token):
+        """
+        Updates the heartbeat timestamp of a client or file server.
+        Args:
+            token (str):    The token of the requestor.
+        """
+        
+        payload = self._get_token_payload(token)
+        
+        if payload is None:
+            return f"Error updating heartbeat. Corrupted token."
+        else:
+            username = payload["username"]
+            role     = payload["role"]
+        
+        conn    = sqlite3.connect(self.db_path)
+        cursor  = conn.cursor()
+        
+        if role == "file_server":
+            try:
+                cursor.execute("""
+                    UPDATE file_servers
+                    SET last_heartbeat = datetime('now')
+                    WHERE name = ?  
+                    """,
+                    (username, )
+                    )
+                conn.commit()
+            
+            except sqlite3.OperationalError as e:
+                print(f"Error updating record for file server:", e)
+            
+            finally:
+                conn.close()
+        
+        else:
+            try:
+                cursor.execute("""
+                    UPDATE users
+                    SET last_heartbeat = datetime('now')
+                    WHERE username = ?  
+                    """,
+                    (username,)
+                    )
+                conn.commit()
+            
+            except sqlite3.OperationalError as e:
+                print(f"Error updating record for client:", e)
+            
+            finally:
+                conn.close()
 
+
+### Periodic jobs ###
 
 def periodic_replication_job(K):
     """
@@ -1381,6 +1454,8 @@ def periodic_replication_job(K):
     Args:
         K (int):    The number of times to replicate the files.
     """
+    
+    print("Replicating files...")
     
     conn    = sqlite3.connect(DB_PATH)
     cursor  = conn.cursor()
@@ -1401,21 +1476,21 @@ def periodic_replication_job(K):
             (K, )
             )
         files_to_replicate = cursor.fetchall()
-        
-        print("RICERCA FILES DA REPLICARE")
-        if files_to_replicate is not None:
-            print("DEBUG. FILES DA REPLICARE:", files_to_replicate)
     
     except sqlite3.OperationalError as e:
         print(f"Error selecting records for replication:", e)
-    
-    finally:
         conn.close()
+        
+        return
+    
+    # If there are no files to replicate, return.
+    if not files_to_replicate:
+        conn.close()
+        
+        return
     
     # For every file that needs to be replicated.
     for file_path, active_replicas in files_to_replicate:
-        conn    = sqlite3.connect(DB_PATH)
-        cursor  = conn.cursor()
         
         # Select address and port of the primary server.
         try:
@@ -1430,20 +1505,16 @@ def periodic_replication_job(K):
             primary_server = cursor.fetchone()
         
         except sqlite3.OperationalError as e:
-            print(f"Error selecting record for file '{file_path}':", e)
-        
-        finally:
+            print(f"Error selecting record:", e)
             conn.close()
+            
+            return
         
         # If the primary server is offline, continue.
-        print(f"DEBUG. PRIMARY SERVER: {primary_server}")
         if not primary_server:
             print(f"File server is offline. Skipping file '{file_path}'.")
             
             continue
-        
-        conn    = sqlite3.connect(DB_PATH)
-        cursor  = conn.cursor()
         
         # Select address and port of the file servers which don't have the file,
         # up to (K - active_replicas).
@@ -1466,18 +1537,17 @@ def periodic_replication_job(K):
         
         except sqlite3.OperationalError as e:
             print(f"Error selecting record for file '{file_path}':", e)
-        
-        finally:
             conn.close()
+            
+            return
         
-        print(f"DEBUG. FILE SERVERS: {file_servers}")
         # If no file servers are available, continue.
         if not file_servers:
-            print(f"No file servers available. Skipping file '{file_path}'.")
+            print(f"No file servers available. Skipping replication for file '{file_path}'.")
             
             continue
         else:
-            # Send, if possible, other file servers' coordinate to the primary server.
+            # Send file servers' coordinates to the primary server if possible.
             # Try to connect to the primary server.
             try:
                 server = rpyc.connect(primary_server[0], primary_server[1])
@@ -1486,12 +1556,11 @@ def periodic_replication_job(K):
             
             except Exception as e:
                 print(f"Unable to connect to primary server: {e}.")
-                continue
+                conn.close()
+                
+                return
         
         # Update the replicas table.
-        conn    = sqlite3.connect(DB_PATH)
-        cursor  = conn.cursor()
-        
         for file_server in file_servers:
             try:
                 cursor.execute("""
@@ -1504,10 +1573,132 @@ def periodic_replication_job(K):
             
             except sqlite3.OperationalError as e:
                 print(f"Error inserting record for file '{file_path}':", e)
-        
-            finally:
                 conn.close()
+                
+                return
+    
+    conn.close()
 
+
+def periodic_check_activity(hb_timeout):
+    """
+    Periodically checks the activity of the other entities in the DFS.
+    Updates the status of the file servers and users if they haven't sent
+    a heartbeat in the last hb_timeout seconds.
+    Args:
+        hb_timeout (int):   The maximum time since the last heartbeat.
+    """
+    
+    print("Checking system entities activity...")
+    
+    conn    = sqlite3.connect(DB_PATH)
+    cursor  = conn.cursor()
+    
+    # Update the status in the file servers table.
+    try:
+        cursor.execute("""
+            UPDATE file_servers
+            SET is_online = 0
+            WHERE is_online = 1
+            AND (strftime('%s', 'now') - strftime('%s', last_heartbeat)) > ?
+            """,
+            (hb_timeout, )
+            )
+        conn.commit()
+    
+    except sqlite3.OperationalError as e:
+        print(f"Error updating file servers status:", e)
+        conn.close()
+        
+        return
+    
+    # Update the status in the users table.
+    try:
+        cursor.execute("""
+            UPDATE users
+            SET is_online = 0
+            WHERE is_online = 1
+            AND (strftime('%s', 'now') - strftime('%s', last_heartbeat)) > ?
+            """,
+            (hb_timeout, )
+            )
+        conn.commit()
+    
+    except sqlite3.OperationalError as e:
+        print(f"Error updating users status:", e)
+        conn.close()
+        
+        return
+    
+    conn.close()
+
+
+def periodic_trigger_garbage_collection():
+    """
+    Periodically sends to the active file servers the files they should have,
+    so that they can delete those files and directories that are not needed
+    anymore.
+    """
+    
+    print("Triggering garbage collection on active file servers...")
+    
+    conn    = sqlite3.connect(DB_PATH)
+    cursor  = conn.cursor()
+    
+    # Select all the file servers that are online.
+    try:
+        cursor.execute("""
+            SELECT name, address, port
+            FROM file_servers
+            WHERE is_online = 1
+            """)
+        file_servers = cursor.fetchall()
+    
+    except sqlite3.OperationalError as e:
+        print(f"Error selecting record for online file servers:", e)
+        conn.close()
+        
+        return
+    
+    # For every online file server.
+    for file_server in file_servers:
+        
+        # Select all the files that are stored in that node, according to the
+        # database.
+        try:
+            cursor.execute("""
+                SELECT file_path
+                FROM replicas
+                WHERE server = ?
+                """,
+                (file_server[0], )
+                )
+            files = cursor.fetchall()
+        
+        except sqlite3.OperationalError as e:
+            print(f"Error selecting record for replicas:", e)
+            conn.close()
+            
+            return
+        
+        # If there are no files for this file server, continue.
+        if not files:
+            continue
+        
+        # Send the files to the file server.
+        try:
+            server = rpyc.connect(file_server[1], file_server[2])
+            server.root.garbage_collection(files)
+        
+        except Exception as e:
+            print(f"Unable to connect to file server: {e}.")
+            conn.close()
+            
+            return
+    
+    conn.close()
+    
+    return
 
 
 if __name__ == "__main__":
@@ -1515,19 +1706,35 @@ if __name__ == "__main__":
     
     # Mantain K replicas.
     K = 2
+    # Receive heart-beats every HB_TIMEOUT seconds.
+    HB_TIMEOUT = 30
     
     scheduler = BackgroundScheduler()
-    scheduler.add_job(periodic_replication_job, args=[K], trigger='interval', seconds=30)
+    
+    print("Starting periodic replication job...")
+    scheduler.add_job(
+        periodic_replication_job,
+        args=[K],
+        trigger='interval',
+        seconds=30
+        )
+    
+    print("Starting periodic check activity job...")
+    scheduler.add_job(
+        periodic_check_activity,
+        args=[HB_TIMEOUT],
+        trigger='interval',
+        seconds=30
+        )
+    
+    print("Starting periodic garbage collection job...")
+    scheduler.add_job(
+        periodic_trigger_garbage_collection,
+        trigger='interval',
+        seconds=30
+    )
+    
     scheduler.start()
-    
-    # Start the replication job in a separate thread.
-    # replication_thread = threading.Thread(
-    #     target=periodic_replication_job(K),
-    #     daemon=True
-    #     )
-    
-    # print("Starting periodic replication job...")
-    # replication_thread.start()
     
     # Start the name server.
     server = ThreadedServer(NameServerService, port=SERVER_PORT)

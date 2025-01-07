@@ -6,6 +6,4 @@
     * Lato-file server:
         * Rimozione di utenti/files cancellati
     * Lato-name server:
-        * Replica dei files
         * Integrità
-        * Controllo entità disattivate

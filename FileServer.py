@@ -3,6 +3,8 @@ import sys
 import rpyc
 from getpass import getpass
 import jwt
+import heartbeats
+from apscheduler.schedulers.background import BackgroundScheduler
 
 
 
@@ -32,7 +34,16 @@ class FileServer(rpyc.Service):
         
         print("Shutting down file server...")
         
+        # Stop the scheduler.
+        print("Shutting down the job scheduler...")
+        if self.scheduler:
+            self.scheduler.remove_all_jobs()
+            self.scheduler.shutdown()
+            self.scheduler = None
+        
         # Update the file server's status in the name server's database.
+        print("Updating client status...")
+        
         try:
             self.conn.root.update_file_server_status(self.name, False, self.token)
         
@@ -118,12 +129,26 @@ class FileServer(rpyc.Service):
         result      = self.conn.root.authenticate_file_server(name, password)
         
         if result["status"]:
-            self.host       = result["host"]
-            self.port       = result["port"]
-            self.files_dir  = "./FS/{}".format(name)
-            self.name       = name
-            self.token      = result["token"]
-            self._public_key = result["public_key"]
+            self.host           = result["host"]
+            self.port           = result["port"]
+            self.files_dir      = "./FS/{}".format(name)
+            self.name           = name
+            self.token          = result["token"]
+            self._public_key    = result["public_key"]
+            self.scheduler      = BackgroundScheduler()
+            
+            # Add activity heartbeat job.
+            print("Starting periodic activity heartbeat job...")
+            self.scheduler.add_job(
+                heartbeats.send_activity_heartbeat,
+                args=[self.conn, self.token],
+                trigger='interval',
+                seconds=30,
+                id="activity_heartbeat"
+                )
+            
+            # Start the scheduler.
+            self.scheduler.start()
             
             # Check whether the file server actually has a local storage directory associated.
             if not os.path.exists(self.files_dir):
@@ -275,6 +300,58 @@ class FileServer(rpyc.Service):
                 result      = fs_conn.root.store_file(file_path, file_data, self.token)
                 
                 print(result["message"])
+    
+    
+    def exposed_garbage_collection(self, db_files):
+        """
+        Deletes all the files in the file server that are not in the list, in
+        order to synchronize the file server with the database.
+        Args:
+            db_files (list):    A list of the files according to the database.
+        """
+        
+        # Transform the list of tuples to a list of strings.
+        db_files = [file[0] for file in db_files]
+        
+        # Get all the files in the local storage.
+        local_files = []
+        
+        for root, _, files in os.walk(self.files_dir):
+            for file in files:
+                local_files.append(os.path.join(root, file))
+        
+        # Add the storage directory to every file received, so to get its
+        # absolute path in the local storage.
+        db_files = [os.path.join(self.files_dir, file) for file in db_files]
+        
+        # Get the files to delete as the difference between the two lists.
+        files_to_delete = list(set(local_files) - set(db_files))
+        
+        # Delete all the files that are not in the list from the local storage.
+        for file in files_to_delete:
+            try:
+                os.remove(file)
+                print(f"Deleted {file}")
+                
+            except Exception as e:
+                print("Error deleting file")
+        
+        # Delete all empty directories in the local storage.
+        for root, dirs, _ in os.walk(self.files_dir):
+            for dir in dirs:
+                
+                # Get the relative path of the directory.
+                dir_path = os.path.join(root, dir)
+                
+                if not os.listdir(dir_path):
+                    # Try to remove the empty directory
+                    try:
+                        # os.rmdir works only if the directory is empty anyways.
+                        os.rmdir(dir_path)
+                        print(f"Deleted empty directory: {dir_path}")
+                    
+                    except Exception as e:
+                        print("Error deleting empty directory")
 
 
 

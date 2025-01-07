@@ -4,6 +4,8 @@ import os
 from getpass import getpass
 import utils
 from tabulate import tabulate
+from apscheduler.schedulers.background import BackgroundScheduler
+import heartbeats
 
 
 
@@ -71,6 +73,7 @@ class RootClient(BaseClient):
         
         # Remove the lock file.
         if os.path.exists(self._lock_file):
+            print("Removing lock file...")
             os.remove(self._lock_file)
     
     
@@ -134,6 +137,20 @@ class RootClient(BaseClient):
                 self.logged_username    = username
                 self.files_dir          = "./CLI/{}".format(username)
                 self.token              = result["token"]
+                self.scheduler          = BackgroundScheduler()
+                
+                # Add activity heartbeat job.
+                print("Starting periodic activity heartbeat job...")
+                self.scheduler.add_job(
+                    heartbeats.send_activity_heartbeat,
+                    args=[self.conn, self.token],
+                    trigger='interval',
+                    seconds=30,
+                    id="activity_heartbeat"
+                    )
+                
+                # Start the scheduler.
+                self.scheduler.start()
                 
                 # Check whether the root client actually has a local files directory.
                 if not os.path.exists(self.files_dir):
