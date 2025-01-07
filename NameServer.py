@@ -1446,12 +1446,16 @@ class NameServerService(rpyc.Service):
                 conn.close()
 
 
+### Periodic jobs ###
+
 def periodic_replication_job(K):
     """
     Periodically replicates the files in the DFS up to K times.
     Args:
         K (int):    The number of times to replicate the files.
     """
+    
+    print("Replicating files...")
     
     conn    = sqlite3.connect(DB_PATH)
     cursor  = conn.cursor()
@@ -1475,17 +1479,18 @@ def periodic_replication_job(K):
     
     except sqlite3.OperationalError as e:
         print(f"Error selecting records for replication:", e)
-    
-    finally:
         conn.close()
+        
+        return
     
+    # If there are no files to replicate, return.
     if not files_to_replicate:
+        conn.close()
+        
         return
     
     # For every file that needs to be replicated.
     for file_path, active_replicas in files_to_replicate:
-        conn    = sqlite3.connect(DB_PATH)
-        cursor  = conn.cursor()
         
         # Select address and port of the primary server.
         try:
@@ -1500,19 +1505,16 @@ def periodic_replication_job(K):
             primary_server = cursor.fetchone()
         
         except sqlite3.OperationalError as e:
-            print(f"Error selecting record for file '{file_path}':", e)
-        
-        finally:
+            print(f"Error selecting record:", e)
             conn.close()
+            
+            return
         
         # If the primary server is offline, continue.
         if not primary_server:
             print(f"File server is offline. Skipping file '{file_path}'.")
             
             continue
-        
-        conn    = sqlite3.connect(DB_PATH)
-        cursor  = conn.cursor()
         
         # Select address and port of the file servers which don't have the file,
         # up to (K - active_replicas).
@@ -1535,17 +1537,17 @@ def periodic_replication_job(K):
         
         except sqlite3.OperationalError as e:
             print(f"Error selecting record for file '{file_path}':", e)
-        
-        finally:
             conn.close()
+            
+            return
         
         # If no file servers are available, continue.
         if not file_servers:
-            print(f"No file servers available. Skipping file '{file_path}'.")
+            print(f"No file servers available. Skipping replication for file '{file_path}'.")
             
             continue
         else:
-            # Send, if possible, other file servers' coordinate to the primary server.
+            # Send file servers' coordinates to the primary server if possible.
             # Try to connect to the primary server.
             try:
                 server = rpyc.connect(primary_server[0], primary_server[1])
@@ -1554,12 +1556,11 @@ def periodic_replication_job(K):
             
             except Exception as e:
                 print(f"Unable to connect to primary server: {e}.")
-                continue
+                conn.close()
+                
+                return
         
         # Update the replicas table.
-        conn    = sqlite3.connect(DB_PATH)
-        cursor  = conn.cursor()
-        
         for file_server in file_servers:
             try:
                 cursor.execute("""
@@ -1572,17 +1573,23 @@ def periodic_replication_job(K):
             
             except sqlite3.OperationalError as e:
                 print(f"Error inserting record for file '{file_path}':", e)
-        
-            finally:
                 conn.close()
+                
+                return
+    
+    conn.close()
 
 
 def periodic_check_activity(hb_timeout):
     """
     Periodically checks the activity of the other entities in the DFS.
+    Updates the status of the file servers and users if they haven't sent
+    a heartbeat in the last hb_timeout seconds.
     Args:
         hb_timeout (int):   The maximum time since the last heartbeat.
     """
+    
+    print("Checking system entities activity...")
     
     conn    = sqlite3.connect(DB_PATH)
     cursor  = conn.cursor()
@@ -1593,7 +1600,7 @@ def periodic_check_activity(hb_timeout):
             UPDATE file_servers
             SET is_online = 0
             WHERE is_online = 1
-            AND (CURRENT_TIMESTAMP - last_heartbeat) * 86400 > ?
+            AND (strftime('%s', 'now') - strftime('%s', last_heartbeat)) > ?
             """,
             (hb_timeout, )
             )
@@ -1611,7 +1618,7 @@ def periodic_check_activity(hb_timeout):
             UPDATE users
             SET is_online = 0
             WHERE is_online = 1
-            AND (CURRENT_TIMESTAMP - last_heartbeat) * 86400 > ?
+            AND (strftime('%s', 'now') - strftime('%s', last_heartbeat)) > ?
             """,
             (hb_timeout, )
             )
@@ -1626,6 +1633,73 @@ def periodic_check_activity(hb_timeout):
     conn.close()
 
 
+def periodic_trigger_garbage_collection():
+    """
+    Periodically sends to the active file servers the files they should have,
+    so that they can delete those files and directories that are not needed
+    anymore.
+    """
+    
+    print("Triggering garbage collection on active file servers...")
+    
+    conn    = sqlite3.connect(DB_PATH)
+    cursor  = conn.cursor()
+    
+    # Select all the file servers that are online.
+    try:
+        cursor.execute("""
+            SELECT name, address, port
+            FROM file_servers
+            WHERE is_online = 1
+            """)
+        file_servers = cursor.fetchall()
+    
+    except sqlite3.OperationalError as e:
+        print(f"Error selecting record for online file servers:", e)
+        conn.close()
+        
+        return
+    
+    # For every online file server.
+    for file_server in file_servers:
+        
+        # Select all the files that are stored in that node, according to the
+        # database.
+        try:
+            cursor.execute("""
+                SELECT file_path
+                FROM replicas
+                WHERE server = ?
+                """,
+                (file_server[0], )
+                )
+            files = cursor.fetchall()
+        
+        except sqlite3.OperationalError as e:
+            print(f"Error selecting record for replicas:", e)
+            conn.close()
+            
+            return
+        
+        # If there are no files for this file server, continue.
+        if not files:
+            continue
+        
+        # Send the files to the file server.
+        try:
+            server = rpyc.connect(file_server[1], file_server[2])
+            server.root.garbage_collection(files)
+        
+        except Exception as e:
+            print(f"Unable to connect to file server: {e}.")
+            conn.close()
+            
+            return
+    
+    conn.close()
+    
+    return
+
 
 if __name__ == "__main__":
     print("Welcome to sym-DFS Project Server.")
@@ -1638,10 +1712,27 @@ if __name__ == "__main__":
     scheduler = BackgroundScheduler()
     
     print("Starting periodic replication job...")
-    scheduler.add_job(periodic_replication_job, args=[K], trigger='interval', seconds=30)
+    scheduler.add_job(
+        periodic_replication_job,
+        args=[K],
+        trigger='interval',
+        seconds=30
+        )
     
     print("Starting periodic check activity job...")
-    scheduler.add_job(periodic_check_activity, args=[HB_TIMEOUT], trigger='interval', seconds=30)
+    scheduler.add_job(
+        periodic_check_activity,
+        args=[HB_TIMEOUT],
+        trigger='interval',
+        seconds=30
+        )
+    
+    print("Starting periodic garbage collection job...")
+    scheduler.add_job(
+        periodic_trigger_garbage_collection,
+        trigger='interval',
+        seconds=30
+    )
     
     scheduler.start()
     

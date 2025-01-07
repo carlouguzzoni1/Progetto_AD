@@ -7,4 +7,3 @@
         * Rimozione di utenti/files cancellati
     * Lato-name server:
         * Integrità
-        * Controllo entità disattivate

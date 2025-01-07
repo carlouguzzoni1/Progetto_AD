@@ -215,6 +215,12 @@ class BaseClient(ABC):
             file_name   = input("Insert absolute file path: ")
             server_path = input("Insert the directory where the file will be stored: ")
             
+            # Check if the file exists.
+            if not os.path.exists(file_name):
+                print(f"File {file_name} not found.")
+                
+                return
+            
             self.upload_file(file_name, server_path)
     
     

@@ -300,6 +300,58 @@ class FileServer(rpyc.Service):
                 result      = fs_conn.root.store_file(file_path, file_data, self.token)
                 
                 print(result["message"])
+    
+    
+    def exposed_garbage_collection(self, db_files):
+        """
+        Deletes all the files in the file server that are not in the list, in
+        order to synchronize the file server with the database.
+        Args:
+            db_files (list):    A list of the files according to the database.
+        """
+        
+        # Transform the list of tuples to a list of strings.
+        db_files = [file[0] for file in db_files]
+        
+        # Get all the files in the local storage.
+        local_files = []
+        
+        for root, _, files in os.walk(self.files_dir):
+            for file in files:
+                local_files.append(os.path.join(root, file))
+        
+        # Add the storage directory to every file received, so to get its
+        # absolute path in the local storage.
+        db_files = [os.path.join(self.files_dir, file) for file in db_files]
+        
+        # Get the files to delete as the difference between the two lists.
+        files_to_delete = list(set(local_files) - set(db_files))
+        
+        # Delete all the files that are not in the list from the local storage.
+        for file in files_to_delete:
+            try:
+                os.remove(file)
+                print(f"Deleted {file}")
+                
+            except Exception as e:
+                print("Error deleting file")
+        
+        # Delete all empty directories in the local storage.
+        for root, dirs, _ in os.walk(self.files_dir):
+            for dir in dirs:
+                
+                # Get the relative path of the directory.
+                dir_path = os.path.join(root, dir)
+                
+                if not os.listdir(dir_path):
+                    # Try to remove the empty directory
+                    try:
+                        # os.rmdir works only if the directory is empty anyways.
+                        os.rmdir(dir_path)
+                        print(f"Deleted empty directory: {dir_path}")
+                    
+                    except Exception as e:
+                        print("Error deleting empty directory")
 
 
 
