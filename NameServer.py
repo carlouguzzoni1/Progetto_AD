@@ -9,7 +9,6 @@ import jwt
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
 from apscheduler.schedulers.background import BackgroundScheduler
-import time
 
 
 
@@ -60,6 +59,8 @@ ROOT_PASSPHRASE = "sym-DFS-project"
 
 
 
+### Name server main class ###
+
 class NameServerService(rpyc.Service):
     """
     Represents the name server, which is the central node in the sym-DFS architecture.
@@ -71,11 +72,6 @@ class NameServerService(rpyc.Service):
     #       disconnesso in modo improvviso prima che le altre componenti possano
     #       a loro volta disconnettersi in modo sicuro. In casi come questo,
     #       clients e file servers permangono nel database come connessi.
-    # IMPROVE: la soluzione migliore potrebbe essere quella di implementare un
-    #       meccanismo di heart-beat, che controlli periodicamente lo stato delle
-    #       connessioni attive e vada ad aggiornare il database.
-    #       Se il name server viene disconnesso in modo improvviso poco importa,
-    #       perché lo stato del database non avrà più importanza a quel punto.
     
     # NOTE: sqlite3 è di default in modalità "serialized", ciò significa che si
     #       possono eseguire più thread in simultanea senza restrizioni.
@@ -368,7 +364,7 @@ class NameServerService(rpyc.Service):
         #       semplicemente che chi tenta di autenticarsi come root debba conoscere
         #       le credenziali.
         # IMPROVE: per rendere il progetto più sicuro si potrebbe implementare un
-        #       massimo di tentativi di accesso.
+        #       numero massimo di tentativi di accesso.
         
         conn    = sqlite3.connect(self.db_path)
         cursor  = conn.cursor()
@@ -462,9 +458,6 @@ class NameServerService(rpyc.Service):
             conn.close()
     
     
-    # REVISIONE DEL CODICE OK FINO QUA! <-----
-    
-    
     def exposed_authenticate_file_server(self, name, password):
         """
         Authenticates a file server.
@@ -490,23 +483,23 @@ class NameServerService(rpyc.Service):
             result  = cursor.fetchone()
         
         except sqlite3.OperationalError as e:
-            print(f"Error selecting record for file server '{name}':", e)
+            print("Error selecting record for file server:", e)
             conn.close()
             
             return {
-                "status": False,
-                "message": f"Error connecting to the database."
+                "status":   False,
+                "message":  f"Error connecting to the database."
                 }
         
-        # Check whether login can't be done.
+        ### Check whether login can't be done.
         
         # Check file server existence. File server must exist.
         if result is None:
             conn.close()
             
             return {
-                "status": False,
-                "message": f"Error: file server '{name}' not found."
+                "status":   False,
+                "message":  f"Error: file server '{name}' not found."
                 }
         
         # Check file server online status. File server must not be online.
@@ -514,8 +507,8 @@ class NameServerService(rpyc.Service):
             conn.close()
             
             return {
-                "status": False,
-                "message": f"Error: file server '{name}' already logged in."
+                "status":   False,
+                "message":  f"Error: file server '{name}' already logged in."
                 }
         
         # Check file server password validity. Password must be correct.
@@ -525,11 +518,11 @@ class NameServerService(rpyc.Service):
             conn.close()
             
             return {
-                "status": False,
-                "message": f"Error: wrong password for file server '{name}'."
+                "status":   False,
+                "message":  f"Error: wrong password for file server '{name}'."
                 }
         
-        # If login can be done (checks passed successfully).
+        ### If the above checks are passed:
         
         # Generate a token.
         token = self._generate_token(name, "file_server")
@@ -547,20 +540,20 @@ class NameServerService(rpyc.Service):
             conn.commit()
             
             return {
-                "status": True,
-                "message": f"File server '{name}' authenticated successfully.",
-                "host": result[2],
-                "port": result[3],
-                "token": token,
-                "public_key": self._public_key
+                "status":       True,
+                "message":      f"File server '{name}' authenticated successfully.",
+                "host":         result[2],
+                "port":         result[3],
+                "token":        token,
+                "public_key":   self._public_key
                 }
         
         except sqlite3.OperationalError as e:
-            print(f"Error updating record for file server '{name}':", e)
+            print("Error updating record for file server:", e)
             
             return {
-                "status": False,
-                "message": f"Error connecting to the database."
+                "status":   False,
+                "message":  f"Error connecting to the database."
                 }
         
         finally:
@@ -656,7 +649,7 @@ class NameServerService(rpyc.Service):
             print("Error while deleting user:", e)
             conn.close()
             
-            return f"Error deleting user {username}."
+            return "Error deleting user {username}."
         
         finally:
             conn.close()
@@ -710,8 +703,8 @@ class NameServerService(rpyc.Service):
             conn.close()
             
             return f"Error logging out. Corrupted token."
-        else:
-            username    = payload["username"]
+        
+        username    = payload["username"]
         
         # Update the user's online status.
         try:
@@ -723,7 +716,6 @@ class NameServerService(rpyc.Service):
                 (username,)
                 )
             conn.commit()
-            conn.close()
             
             return f"User '{username}' logged out successfully."
         
@@ -732,19 +724,22 @@ class NameServerService(rpyc.Service):
             conn.close()
             
             return f"Error logging out user '{username}'."
+        
+        finally:
+            conn.close()
     
     
     def exposed_get_user_files(self, token):
         """
-        Gets the files owned by a user.
+        Gets the files owned by a user for visualization purposes.
         Args:
             token (str):    The JWT token of the user.
         Returns:
             list:           A list of dictionaries containing the file information.
         """
         
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        conn    = sqlite3.connect(self.db_path)
+        cursor  = conn.cursor()
         
         # Get the username from the token.
         payload = self._get_token_payload(token)
@@ -753,11 +748,11 @@ class NameServerService(rpyc.Service):
             conn.close()
             
             return {
-                "status": False,
-                "message": "Error getting user files. Corrupted token."
+                "status":   False,
+                "message":  "Error getting user files. Corrupted token."
                 }
-        else:
-            username = payload["username"]
+        
+        username = payload["username"]
         
         # Get the files owned by the user.
         try:
@@ -773,50 +768,76 @@ class NameServerService(rpyc.Service):
             # Check whether the user has any files.
             if not result:
                 return {
-                    "status": False,
-                    "message": f"User '{username}' has no files."
+                    "status":   False,
+                    "message":  f"User '{username}' has no files."
                     }
-            else:
-                return {
-                    "status": True,
-                    "message": f"Files for user '{username}' retrieved successfully.",
-                    "files": result
-                    }
+            
+            return {
+                "status":   True,
+                "message":  f"Files for user '{username}' retrieved successfully.",
+                "files":    result
+                }
         
         except sqlite3.OperationalError as e:
             print(f"Error selecting record for user:", e)
             
             return {
-                "status": False,
-                "message": f"Error retrieving files for user '{username}'."
+                "status":   False,
+                "message":  f"Error retrieving files for user '{username}'."
                 }
         
         finally:
             conn.close()
     
     
-    def exposed_get_file_server_upload(self, file_path, token, file_size, checksum):
+    def exposed_get_file_server_upload(self, token, file_path, file_size, checksum):
         """
-        Gets the best file server to store a file according to K-least loaded
-        policy.
+        Gets the best file server to store a client's file according to K-least
+        loaded policy. In this case load is the free space of the file server.
         Args:
-            file_path (str):    The absolute path of the file.
             token (str):        The JWT token of the user.
+            file_path (str):    The absolute file path in the DFS.
             file_size (int):    The size of the file.
             checksum (str):     The checksum of the file.
         Returns:
             dict:               A dictionary containing the file server information.
         """
         
+        # Get the username from the token.
+        payload = self._get_token_payload(token)
+        
+        if payload is None:
+            return {
+                "status":   False,
+                "message":  f"Error getting user files. Corrupted token."
+                }
+        else:
+            username = payload["username"]
+        
+        # Verify that the first directory has the same name as the username.
+        if file_path.split("/")[0] != username:
+            return {
+                "status":   False,
+                "message":  f"Error sending file. Base directory does not match username."
+                }
+        
+        # Verify that the file path does not contain any '..'.
+        if ".." in file_path:
+            return {
+                "status":   False,
+                "message":  f"Error sending file. Invalid file path."
+                }
+        
         # Get the file's name.
         file_name = os.path.basename(file_path)
         
+        # K is the number of file servers to randomly choose from.
         K = 3
         
-        # Get the K least loaded file servers.
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
+        # Get the K least loaded file servers.
         try:
             cursor.execute("""
                 SELECT name, address, port, free_space
@@ -831,20 +852,18 @@ class NameServerService(rpyc.Service):
         
         except sqlite3.OperationalError as e:
             print("Error selecting record for file server:", e)
+            conn.close()
             
             return {
-                "status": False,
-                "message": f"Error getting best file server for file '{file_name}'."
+                "status":   False,
+                "message":  f"Error getting best file server for file '{file_name}'."
                 }
-        
-        finally:
-            conn.close()
         
         # Check if there is any file server available.
         if len(result) == 0:
             return {
-                "status": False,
-                "message": f"No file server available for file '{file_name}'."
+                "status":   False,
+                "message":  f"No file server available for file '{file_name}'."
             }
         
         # Select the best file server randomly.
@@ -860,14 +879,11 @@ class NameServerService(rpyc.Service):
         # If no file server has enough free space, return an error message.
         if best_file_server is None:
             return {
-                "status": False,
-                "message": f"No file server has enough free space for file '{file_name}'."
+                "status":   False,
+                "message":  f"No file server has enough free space for file '{file_name}'."
             }
         
-        # Update the file server's free space.
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
+        # Update the file server's free space.        
         try:
             cursor.execute("""
                 UPDATE file_servers
@@ -879,40 +895,15 @@ class NameServerService(rpyc.Service):
             conn.commit()
         
         except sqlite3.OperationalError as e:
-            print(f"Error updating record for file server {best_file_server[0]}:", e)
-        
-        finally:
+            print("Error updating record for file server:", e)
             conn.close()
-        
-        # Get the username from the token.
-        payload = self._get_token_payload(token)
-        
-        if payload is None:
+            
             return {
-                "status": False,
-                "message": f"Error getting user files. Corrupted token."
-                }
-        else:
-            username = payload["username"]
-        
-        # Verify that the first directory has the same name as the username.
-        if file_path.split("/")[0] != username:
-            return {
-                "status": False,
-                "message": f"Error sending file. Base directory does not match username."
-                }
-        
-        # Verify that the file path does not contain any '..'.
-        if ".." in file_path:
-            return {
-                "status": False,
-                "message": f"Error sending file. Invalid file path."
+                "status":   False,
+                "message":  f"Error updating file server for file '{file_name}'."
                 }
         
         # Create new entry into the files table.
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
         try:
             cursor.execute("""
                 INSERT INTO files (file_path, file_name, owner, size, checksum, primary_server)
@@ -924,14 +915,14 @@ class NameServerService(rpyc.Service):
         
         except sqlite3.OperationalError as e:
             print(f"Error inserting record for file:", e)
-        
-        finally:
             conn.close()
+            
+            return {
+                "status":   False,
+                "message":  f"Error creating for file '{file_name}'."
+                }
         
         # Create a new entry into the replicas table.
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
         try:
             cursor.execute("""
                 INSERT INTO replicas (file_path, server)
@@ -940,28 +931,37 @@ class NameServerService(rpyc.Service):
                 (file_path, best_file_server[0])
                 )
             conn.commit()
+            
+            return {
+            "status":   True,
+            "message":  f"Best file server found.",
+            "host":     best_file_server[1],
+            "port":     best_file_server[2]
+            }
         
         except sqlite3.OperationalError as e:
             print(f"Error inserting record for replica of file:", e)
+            conn.close()
+            
+            return {
+                "status":   False,
+                "message":  f"Error creating replica for file '{file_name}'."
+                }
         
         finally:
             conn.close()
-        
-        return {
-            "status": True,
-            "message": f"Best file server found.",
-            "host": best_file_server[1],
-            "port": best_file_server[2]
-            }
     
     
-    def exposed_get_file_server_download(self, file_path, token):
+    ### Riordino codice OK fino qua <-----
+    
+    def exposed_get_file_server_download(self, token, file_path):
         """
-        Gets the primary server for a file, or in case it is offline, the first
-        file server available to download the file.
+        Gets the primary server for a client which wants to download a file.
+        In case the primary file server is offline, the first file server
+        available is returned.
         Args:
-            file_path (str):    The path of the file in the DFS.
-            token (str):        The token of the requestor.
+            file_path (str):    The absolute file path in the DFS.
+            token (str):        The JWT token of the requestor.
         Returns:
             dict:               A dictionary containing the file server information.
         """

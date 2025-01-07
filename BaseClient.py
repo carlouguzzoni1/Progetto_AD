@@ -173,8 +173,8 @@ class BaseClient(ABC):
         
         # Ask the name server for the file server.
         result      = self.conn.root.get_file_server_upload(
-            server_path,
             self.token,
+            server_path,
             file_size,
             checksum
             )
@@ -231,7 +231,7 @@ class BaseClient(ABC):
             server_path (str): The absolute path of the file to download on the DFS.
         """
         
-        result      = self.conn.root.get_file_server_download(server_path, self.token)
+        result      = self.conn.root.get_file_server_download(self.token, server_path)
         
         print(result["message"])
         
