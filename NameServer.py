@@ -9,6 +9,7 @@ import jwt
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
 from apscheduler.schedulers.background import BackgroundScheduler
+import time
 
 
 
@@ -154,7 +155,8 @@ class NameServerService(rpyc.Service):
                     username TEXT PRIMARY KEY,
                     password_hash TEXT NOT NULL,
                     is_root BOOLEAN NOT NULL DEFAULT 0,
-                    is_online BOOLEAN NOT NULL DEFAULT 0
+                    is_online BOOLEAN NOT NULL DEFAULT 0,
+                    last_heartbeat TIMESTAMP
                 );
             """)
         except sqlite3.OperationalError as e:
@@ -434,7 +436,8 @@ class NameServerService(rpyc.Service):
         try:
             cursor.execute("""
                 UPDATE users
-                SET is_online = 1
+                SET is_online = 1,
+                last_heartbeat = CURRENT_TIMESTAMP
                 WHERE username = ?
                 """,
                 (username,)
@@ -457,6 +460,9 @@ class NameServerService(rpyc.Service):
         
         finally:
             conn.close()
+    
+    
+    # REVISIONE DEL CODICE OK FINO QUA! <-----
     
     
     def exposed_authenticate_file_server(self, name, password):
@@ -532,7 +538,8 @@ class NameServerService(rpyc.Service):
         try:
             cursor.execute("""
                 UPDATE file_servers
-                SET is_online = 1
+                SET is_online = 1,
+                last_heartbeat = CURRENT_TIMESTAMP
                 WHERE name = ?
                 """,
                 (name,)
@@ -1384,6 +1391,59 @@ class NameServerService(rpyc.Service):
         
         finally:
             conn.close()
+    
+    
+    def exposed_activity_heartbeat(self, token):
+        """
+        Updates the heartbeat timestamp of a client or file server.
+        Args:
+            token (str):    The token of the requestor.
+        """
+        
+        payload = self._get_token_payload(token)
+        
+        if payload is None:
+            return f"Error updating heartbeat. Corrupted token."
+        else:
+            username = payload["username"]
+            role     = payload["role"]
+        
+        conn    = sqlite3.connect(self.db_path)
+        cursor  = conn.cursor()
+        
+        if role == "file_server":
+            try:
+                cursor.execute("""
+                    UPDATE file_servers
+                    SET last_heartbeat = datetime('now')
+                    WHERE name = ?  
+                    """,
+                    (username, )
+                    )
+                conn.commit()
+            
+            except sqlite3.OperationalError as e:
+                print(f"Error updating record for file server:", e)
+            
+            finally:
+                conn.close()
+        
+        else:
+            try:
+                cursor.execute("""
+                    UPDATE users
+                    SET last_heartbeat = datetime('now')
+                    WHERE username = ?  
+                    """,
+                    (username,)
+                    )
+                conn.commit()
+            
+            except sqlite3.OperationalError as e:
+                print(f"Error updating record for client:", e)
+            
+            finally:
+                conn.close()
 
 
 def periodic_replication_job(K):
@@ -1412,16 +1472,15 @@ def periodic_replication_job(K):
             (K, )
             )
         files_to_replicate = cursor.fetchall()
-        
-        print("RICERCA FILES DA REPLICARE")
-        if files_to_replicate is not None:
-            print("DEBUG. FILES DA REPLICARE:", files_to_replicate)
     
     except sqlite3.OperationalError as e:
         print(f"Error selecting records for replication:", e)
     
     finally:
         conn.close()
+    
+    if not files_to_replicate:
+        return
     
     # For every file that needs to be replicated.
     for file_path, active_replicas in files_to_replicate:
@@ -1447,7 +1506,6 @@ def periodic_replication_job(K):
             conn.close()
         
         # If the primary server is offline, continue.
-        print(f"DEBUG. PRIMARY SERVER: {primary_server}")
         if not primary_server:
             print(f"File server is offline. Skipping file '{file_path}'.")
             
@@ -1481,7 +1539,6 @@ def periodic_replication_job(K):
         finally:
             conn.close()
         
-        print(f"DEBUG. FILE SERVERS: {file_servers}")
         # If no file servers are available, continue.
         if not file_servers:
             print(f"No file servers available. Skipping file '{file_path}'.")
@@ -1520,25 +1577,73 @@ def periodic_replication_job(K):
                 conn.close()
 
 
+def periodic_check_activity(hb_timeout):
+    """
+    Periodically checks the activity of the other entities in the DFS.
+    Args:
+        hb_timeout (int):   The maximum time since the last heartbeat.
+    """
+    
+    conn    = sqlite3.connect(DB_PATH)
+    cursor  = conn.cursor()
+    
+    # Update the status in the file servers table.
+    try:
+        cursor.execute("""
+            UPDATE file_servers
+            SET is_online = 0
+            WHERE is_online = 1
+            AND (CURRENT_TIMESTAMP - last_heartbeat) * 86400 > ?
+            """,
+            (hb_timeout, )
+            )
+        conn.commit()
+    
+    except sqlite3.OperationalError as e:
+        print(f"Error updating file servers status:", e)
+        conn.close()
+        
+        return
+    
+    # Update the status in the users table.
+    try:
+        cursor.execute("""
+            UPDATE users
+            SET is_online = 0
+            WHERE is_online = 1
+            AND (CURRENT_TIMESTAMP - last_heartbeat) * 86400 > ?
+            """,
+            (hb_timeout, )
+            )
+        conn.commit()
+    
+    except sqlite3.OperationalError as e:
+        print(f"Error updating users status:", e)
+        conn.close()
+        
+        return
+    
+    conn.close()
+
+
 
 if __name__ == "__main__":
     print("Welcome to sym-DFS Project Server.")
     
     # Mantain K replicas.
     K = 2
+    # Receive heart-beats every HB_TIMEOUT seconds.
+    HB_TIMEOUT = 30
     
     scheduler = BackgroundScheduler()
+    
+    print("Starting periodic replication job...")
     scheduler.add_job(periodic_replication_job, args=[K], trigger='interval', seconds=30)
+    
+    print("Starting periodic check activity job...")
+    scheduler.add_job(periodic_check_activity, args=[HB_TIMEOUT], trigger='interval', seconds=30)
+    
     scheduler.start()
-    
-    # Start the replication job in a separate thread.
-    # replication_thread = threading.Thread(
-    #     target=periodic_replication_job(K),
-    #     daemon=True
-    #     )
-    
-    # print("Starting periodic replication job...")
-    # replication_thread.start()
     
     # Start the name server.
     server = ThreadedServer(NameServerService, port=SERVER_PORT)

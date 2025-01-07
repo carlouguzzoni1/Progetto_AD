@@ -36,6 +36,7 @@ class BaseClient(ABC):
         self.logged_username    = None
         self.files_dir          = None
         self.token              = None
+        self.scheduler          = None
     
     
     def __del__(self):
@@ -45,8 +46,17 @@ class BaseClient(ABC):
         
         print("Shutting down client...")
         
+        # Stop the scheduler.
+        print("Shutting down the job scheduler...")
+        if self.scheduler:
+            self.scheduler.remove_all_jobs()
+            # self.scheduler.shutdown()
+            self.scheduler = None
+        
         # Update the client's status in the name server's database.
         if self.user_is_logged:
+            print("Updating client status...")
+            
             try:
                 self.conn.root.update_client_status(self.logged_username, False, self.token)
             

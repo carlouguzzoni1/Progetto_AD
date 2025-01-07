@@ -3,6 +3,8 @@ import os
 import sys
 from BaseClient import BaseClient
 from getpass import getpass
+import heartbeats
+from apscheduler.schedulers.background import BackgroundScheduler
 
 
 
@@ -60,6 +62,20 @@ class RegularClient(BaseClient):
             self.logged_username    = username
             self.files_dir          = "./CLI/{}".format(username)
             self.token              = result["token"]
+            self.scheduler          = BackgroundScheduler()
+            
+            # Add activity heartbeat job.
+            print("Starting periodic activity heartbeat job...")
+            self.scheduler.add_job(
+                heartbeats.send_activity_heartbeat,
+                args=[self.conn, self.token],
+                trigger='interval',
+                seconds=30,
+                id="activity_heartbeat"
+                )
+            
+            # Start the scheduler.
+            self.scheduler.start()
             
             # Check whether the client actually has a local files directory.
             if not os.path.exists(self.files_dir):
@@ -79,6 +95,9 @@ class RegularClient(BaseClient):
             self.logged_username    = None
             self.files_dir          = None
             self.token              = None
+            self.scheduler.remove_all_jobs()
+            self.scheduler.shutdown()
+            self.scheduler          = None
             print(result)
         else:
             print("No user is logged in.")

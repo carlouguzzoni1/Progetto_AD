@@ -3,6 +3,8 @@ import sys
 import rpyc
 from getpass import getpass
 import jwt
+import heartbeats
+from apscheduler.schedulers.background import BackgroundScheduler
 
 
 
@@ -32,7 +34,16 @@ class FileServer(rpyc.Service):
         
         print("Shutting down file server...")
         
+        # Stop the scheduler.
+        print("Shutting down the job scheduler...")
+        if self.scheduler:
+            self.scheduler.remove_all_jobs()
+            self.scheduler.shutdown()
+            self.scheduler = None
+        
         # Update the file server's status in the name server's database.
+        print("Updating client status...")
+        
         try:
             self.conn.root.update_file_server_status(self.name, False, self.token)
         
@@ -118,12 +129,26 @@ class FileServer(rpyc.Service):
         result      = self.conn.root.authenticate_file_server(name, password)
         
         if result["status"]:
-            self.host       = result["host"]
-            self.port       = result["port"]
-            self.files_dir  = "./FS/{}".format(name)
-            self.name       = name
-            self.token      = result["token"]
-            self._public_key = result["public_key"]
+            self.host           = result["host"]
+            self.port           = result["port"]
+            self.files_dir      = "./FS/{}".format(name)
+            self.name           = name
+            self.token          = result["token"]
+            self._public_key    = result["public_key"]
+            self.scheduler      = BackgroundScheduler()
+            
+            # Add activity heartbeat job.
+            print("Starting periodic activity heartbeat job...")
+            self.scheduler.add_job(
+                heartbeats.send_activity_heartbeat,
+                args=[self.conn, self.token],
+                trigger='interval',
+                seconds=30,
+                id="activity_heartbeat"
+                )
+            
+            # Start the scheduler.
+            self.scheduler.start()
             
             # Check whether the file server actually has a local storage directory associated.
             if not os.path.exists(self.files_dir):
