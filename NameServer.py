@@ -1476,7 +1476,7 @@ class NameServerService(rpyc.Service):
         conn    = sqlite3.connect(self.db_path)
         cursor  = conn.cursor()
         
-        # Select the primary server for the file.
+        # Select the primary file server for the file.
         try:
             cursor.execute("""
                 SELECT primary_server
@@ -1485,7 +1485,7 @@ class NameServerService(rpyc.Service):
                 """,
                 (file_path, )
                 )
-            primary_server = cursor.fetchone()
+            primary_server = cursor.fetchone()[0]
             
         except sqlite3.OperationalError as e:
             print(f"Error selecting primary server:", e)
@@ -1513,6 +1513,10 @@ class NameServerService(rpyc.Service):
             conn.close()
             
             return f"Error removing replica for file '{file_path}'"
+        
+        # DEBUG
+        print("Requestor:", name)
+        print("Primary server:", primary_server)
         
         # If the requestor was not the primary server for the file, just return.
         if name != primary_server:
@@ -1544,6 +1548,12 @@ class NameServerService(rpyc.Service):
         # If a new online primary file server was found, update the primary
         # server for the file.
         if new_primary_server:
+            # Get the name of the new primary file server (query result is a tuple).
+            new_primary_server = new_primary_server[0]
+            
+            # DEBUG
+            print("New online primary server:", new_primary_server)
+            
             try:
                 cursor.execute("""
                     UPDATE files
@@ -1588,6 +1598,12 @@ class NameServerService(rpyc.Service):
         # If a new offline primary file server was found, update the primary
         # server for the file.
         if new_primary_server:
+            # Get the name of the new primary file server (query result is a tuple).
+            new_primary_server = new_primary_server[0]
+            
+            # DEBUG
+            print("New offline primary server:", new_primary_server)
+            
             try:
                 cursor.execute("""
                     UPDATE files
@@ -1603,6 +1619,9 @@ class NameServerService(rpyc.Service):
                 conn.close()
                 
                 return f"Error updating the primary server for file '{file_path}'"
+        
+        # DEBUG
+        print("No new primary server found. Marking file as corrupted...")
         
         # Eventually, if no new primary file server was found, mark the file as
         # corrupted.
