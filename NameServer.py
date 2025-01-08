@@ -187,6 +187,7 @@ class NameServerService(rpyc.Service):
                     checksum TEXT NOT NULL,
                     primary_server TEXT NOT NULL,
                     uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    is_corrupted BOOLEAN NOT NULL DEFAULT 0,
                     FOREIGN KEY (primary_server) REFERENCES file_servers (name),
                     FOREIGN KEY (owner) REFERENCES users (username)
                 );
@@ -757,7 +758,7 @@ class NameServerService(rpyc.Service):
         # Get the files owned by the user.
         try:
             cursor.execute("""
-                SELECT file_path, size, checksum, uploaded_at, primary_server
+                SELECT file_path, size, checksum, is_corrupted, uploaded_at, primary_server
                 FROM files
                 WHERE owner = ?
                 """,
@@ -1148,7 +1149,7 @@ class NameServerService(rpyc.Service):
         
         try:
             cursor.execute("""
-                SELECT f.file_path, f.size, f.owner, f.checksum, f.uploaded_at, r.server
+                SELECT f.file_path, f.size, f.owner, f.checksum, f.is_corrupted, f.uploaded_at, r.server
                 FROM files AS f
                 JOIN replicas AS r ON f.file_path = r.file_path
                 """)
@@ -1444,6 +1445,184 @@ class NameServerService(rpyc.Service):
             
             finally:
                 conn.close()
+    
+    
+    def exposed_handle_file_inconsistency(self, token, file_path):
+        """
+        Takes actions to handle a file inconsistency found in a file server.
+        Args:
+            token (str):        The JWT token of the file server.
+            file_path (str):    The path of the file in the DFS.
+        """
+        
+        # Get the role from the token.
+        payload = self._get_token_payload(token)
+        
+        if payload is None:
+            return f"Error handling file inconsistency. Corrupted token."
+        
+        role    = payload["role"]
+        name    = payload["username"]
+        
+        # Verify the requestor is a file server.
+        if role != "file_server":
+            return f"Error handling file inconsistency. Requestor is not a file server."
+        
+        ### Handle the inconsistency.
+        
+        conn    = sqlite3.connect(self.db_path)
+        cursor  = conn.cursor()
+        
+        # Select the primary server for the file.
+        try:
+            cursor.execute("""
+                SELECT primary_server
+                FROM files
+                WHERE file_path = ?
+                """,
+                (file_path, )
+                )
+            primary_server = cursor.fetchone()[0]
+            
+        except sqlite3.OperationalError as e:
+            print(f"Error selecting primary server:", e)
+            conn.close()
+            
+            return f"Error getting the primary serfer for file '{file_path}'"
+        
+        # If the requestor was not the primary file server for the file, just
+        # remove the replica from the database.
+        # If the requestor was the primary file server for the file, remove the
+        # replica from the database then try to find a new primary file server.
+        
+        # Basically, we need to delete the replica in any way.
+        try:
+            cursor.execute("""
+                DELETE FROM replicas
+                WHERE file_path = ? AND server = ?
+                """,
+                (file_path, name)
+                )
+            conn.commit()
+        
+        except sqlite3.OperationalError as e:
+            print(f"Error deleting replica:", e)
+            conn.close()
+            
+            return f"Error removing replica for file '{file_path}'"
+        
+        # If the requestor was not the primary server for the file, just return.
+        if name != primary_server:
+            conn.close()
+            
+            return f"Replica for file '{file_path}' removed successfully."
+        
+        # First, try to find a new primary file server which is online.
+        try:
+            cursor.execute("""
+                SELECT fs.name
+                FROM files AS f
+                JOIN replicas AS r ON f.file_path = r.file_path
+                JOIN file_servers AS fs ON r.server = fs.name
+                WHERE fs.is_online = 1
+                AND f.file_path = ?
+                LIMIT 1
+                """,
+                (file_path, )
+                )
+            new_primary_server = cursor.fetchone()[0]
+        
+        except sqlite3.OperationalError as e:
+            print(f"Error selecting new primary server:", e)
+            conn.close()
+            
+            return f"Error getting the new primary serfer for file '{file_path}'"
+        
+        # If a new online primary file server was found, update the primary
+        # server for the file.
+        if new_primary_server:
+            try:
+                cursor.execute("""
+                    UPDATE files
+                    SET primary_server = ?
+                    WHERE file_path = ?
+                    """,
+                    (new_primary_server, file_path)
+                    )
+                conn.commit()
+            
+            except sqlite3.OperationalError as e:
+                print(f"Error updating primary server:", e)
+                conn.close()
+                
+                return f"Error updating the primary server for file '{file_path}'"
+        
+            conn.close()
+            
+            return f"Primary server for file '{file_path}' updated successfully."
+        
+        # If no new online primary file server was found, try to find one offline.
+        try:
+            cursor.execute("""
+                SELECT fs.name
+                FROM files AS f
+                JOIN replicas AS r ON f.file_path = r.file_path
+                JOIN file_servers AS fs ON r.server = fs.name
+                WHERE fs.is_online = 1
+                AND f.file_path = ?
+                LIMIT 1
+                """,
+                (file_path, )
+                )
+            new_primary_server = cursor.fetchone()[0]
+        
+        except sqlite3.OperationalError as e:
+            print(f"Error selecting new primary server:", e)
+            conn.close()
+            
+            return f"Error getting the new primary serfer for file '{file_path}'"
+        
+        # If a new offline primary file server was found, update the primary
+        # server for the file.
+        if new_primary_server:
+            try:
+                cursor.execute("""
+                    UPDATE files
+                    SET primary_server = ?
+                    WHERE file_path = ?
+                    """,
+                    (new_primary_server, file_path)
+                    )
+                conn.commit()
+            
+            except sqlite3.OperationalError as e:    
+                print(f"Error updating primary server:", e)
+                conn.close()
+                
+                return f"Error updating the primary server for file '{file_path}'"
+        
+        # Eventually, if no new primary file server was found, mark the file as
+        # corrupted.
+        try:
+            cursor.execute("""
+                UPDATE files
+                SET is_corrupted = 1
+                WHERE file_path = ?
+                """,
+                (file_path, )
+                )
+            conn.commit()
+        
+        except sqlite3.OperationalError as e:
+            print(f"Error marking file as corrupted:", e)
+            conn.close()
+            
+            return f"Error marking file '{file_path}' as corrupted"
+        
+        conn.close()
+        
+        return f"File '{file_path}' marked as corrupted successfully."
+
 
 
 ### Periodic jobs ###
@@ -1701,6 +1880,73 @@ def periodic_trigger_garbage_collection():
     return
 
 
+def periodic_trigger_consistency_check():
+    """
+    Periodically sends to the active file servers the files they should have
+    and their checksums, so that they can check the consistency of the files
+    they store.
+    """
+    
+    print("Triggering consistency check on active file servers...")
+    
+    conn    = sqlite3.connect(DB_PATH)
+    cursor  = conn.cursor()
+    
+    # Select all the file servers that are online.
+    try:
+        cursor.execute("""
+            SELECT name, address, port
+            FROM file_servers
+            WHERE is_online = 1
+            """)
+        file_servers = cursor.fetchall()
+    
+    except sqlite3.OperationalError as e:
+        print(f"Error selecting online file servers:", e)
+        conn.close()
+        
+        return
+    
+    # For every online file server.
+    for file_server in file_servers:
+        
+        # Select all the files that are stored in that node, according to the
+        # database.
+        try:
+            cursor.execute("""
+                SELECT f.file_path, f.checksum
+                FROM replicas AS r
+                JOIN files AS f ON r.file_path = f.file_path
+                WHERE r.server = ?
+                """,
+                (file_server[0], )
+                )
+            files = cursor.fetchall()
+        
+        except sqlite3.OperationalError as e:
+            print(f"Error selecting replicas:", e)
+            
+            return
+        
+        # If there are no files for this file server, continue.
+        if not files:
+            continue
+        
+        # Send the files to the file server.
+        try:
+            server = rpyc.connect(file_server[1], file_server[2])
+            server.root.consistency_check(files)
+        
+        except Exception as e:
+            print(f"Unable to connect to file server: {e}.")
+            conn.close()
+            
+            return
+    
+    conn.close()
+
+
+
 if __name__ == "__main__":
     print("Welcome to sym-DFS Project Server.")
     
@@ -1730,6 +1976,13 @@ if __name__ == "__main__":
     print("Starting periodic garbage collection job...")
     scheduler.add_job(
         periodic_trigger_garbage_collection,
+        trigger='interval',
+        seconds=30
+    )
+    
+    print("Starting periodic consistency check job...")
+    scheduler.add_job(
+        periodic_trigger_consistency_check,
         trigger='interval',
         seconds=30
     )

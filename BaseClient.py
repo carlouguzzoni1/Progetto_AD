@@ -133,7 +133,7 @@ class BaseClient(ABC):
             # If the operation was successful, print the result.
             if result["status"]:
                 # Convert the result to a list of dictionaries.
-                headers = ["File", "Size", "Checksum", "Uploaded at", "Primary Server"]
+                headers = ["File", "Size", "Checksum", "Is corrupted", "Uploaded at", "Primary Server"]
                 result["files"]  = [dict(zip(headers, row)) for row in result["files"]]
                 
                 MAX_CHECKSUM_LEN = 15
@@ -143,6 +143,7 @@ class BaseClient(ABC):
                         "File"          : f["File"],
                         "Size"          : f["Size"],
                         "Checksum"      : utils.truncate(f["Checksum"], MAX_CHECKSUM_LEN),
+                        "Is corrupted"  : f["Is corrupted"],
                         "Uploaded at"   : f["Uploaded at"],
                         "Primary Server": f["Primary Server"]
                     }
