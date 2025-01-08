@@ -1464,6 +1464,9 @@ class NameServerService(rpyc.Service):
         role    = payload["role"]
         name    = payload["username"]
         
+        # DEBUG
+        print(f"Handling file inconsistency for file '{file_path}' on file server '{name}'...")
+        
         # Verify the requestor is a file server.
         if role != "file_server":
             return f"Error handling file inconsistency. Requestor is not a file server."
@@ -1482,7 +1485,7 @@ class NameServerService(rpyc.Service):
                 """,
                 (file_path, )
                 )
-            primary_server = cursor.fetchone()[0]
+            primary_server = cursor.fetchone()
             
         except sqlite3.OperationalError as e:
             print(f"Error selecting primary server:", e)
@@ -1530,7 +1533,7 @@ class NameServerService(rpyc.Service):
                 """,
                 (file_path, )
                 )
-            new_primary_server = cursor.fetchone()[0]
+            new_primary_server = cursor.fetchone()
         
         except sqlite3.OperationalError as e:
             print(f"Error selecting new primary server:", e)
@@ -1574,7 +1577,7 @@ class NameServerService(rpyc.Service):
                 """,
                 (file_path, )
                 )
-            new_primary_server = cursor.fetchone()[0]
+            new_primary_server = cursor.fetchone()
         
         except sqlite3.OperationalError as e:
             print(f"Error selecting new primary server:", e)
@@ -1910,8 +1913,8 @@ def periodic_trigger_consistency_check():
     # For every online file server.
     for file_server in file_servers:
         
-        # Select all the files that are stored in that node, according to the
-        # database.
+        # Select all the files that are stored in that node and their checksums,
+        # according to the database.
         try:
             cursor.execute("""
                 SELECT f.file_path, f.checksum
@@ -1991,6 +1994,6 @@ if __name__ == "__main__":
     
     # Start the name server.
     server = ThreadedServer(NameServerService, port=SERVER_PORT)
-        
+    
     print("Starting name server...")
     server.start()
