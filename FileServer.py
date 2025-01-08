@@ -198,6 +198,9 @@ class FileServer(rpyc.Service):
             dict:                   A dictionary containing the status of the operation.
         """
         
+        # DEBUG
+        print(f"Storing file '{file_path}'...")
+        
         # Verify the token.
         payload = self._get_token_payload(token)
         
@@ -211,7 +214,7 @@ class FileServer(rpyc.Service):
         directories = file_path.split("/")
         
         # Get the file name.
-        file_name = os.path.basename(file_path)
+        file_name   = os.path.basename(file_path)
         
         # Create the directories (if needed).
         for directory in directories[:-1]:
@@ -221,7 +224,7 @@ class FileServer(rpyc.Service):
                 os.mkdir(dir)
         
         # Create the new file path.
-        file_path = os.path.join(dir, file_name)
+        file_path   = os.path.join(dir, file_name)
         
         # Try to store the file.
         try:
@@ -245,6 +248,9 @@ class FileServer(rpyc.Service):
         Returns:
             dict:               A dictionary containing the file data.
         """
+        
+        # DEBUG
+        print(f"Sending file '{file_path}'...")
         
         # Get the username from the token.
         payload = self._get_token_payload(token)
@@ -273,11 +279,11 @@ class FileServer(rpyc.Service):
         with open(file_path, "rb") as file:
             file_data = file.read()
             
-        return {
-            "status": True,
-            "file_data": file_data,
-            "message": "File received successfully."
-            }
+            return {
+                "status": True,
+                "file_data": file_data,
+                "message": "File received successfully."
+                }
     
     
     def exposed_send_file_replicas(self, file_path, file_servers):
@@ -288,8 +294,14 @@ class FileServer(rpyc.Service):
             file_servers (list):    A list of file servers to send the file to.
         """
         
+        # DEBUG
+        print(f"Received request to send replicas for file '{file_path}'.")
+        
         # Iterate through the file servers and send the file.
         for server in file_servers:
+            # DEBUG
+            print(f"Sending replica to file server {server[0]}...")
+            
             # Connect to the file server. server is a list of tuples.
             fs_conn         = rpyc.connect(server[1], server[2])
             
@@ -312,6 +324,9 @@ class FileServer(rpyc.Service):
             db_files (list):    A list of the files according to the database.
         """
         
+        # DEBUG
+        print("Running garbage collection...")
+        
         # Transform the list of tuples to a list of strings.
         db_files = [file[0] for file in db_files]
         
@@ -333,6 +348,8 @@ class FileServer(rpyc.Service):
         for file in files_to_delete:
             try:
                 os.remove(file)
+                
+                # DEBUG
                 print(f"Deleted {file}")
                 
             except Exception as e:
@@ -350,6 +367,8 @@ class FileServer(rpyc.Service):
                     try:
                         # os.rmdir works only if the directory is empty anyways.
                         os.rmdir(dir_path)
+                        
+                        # DEBUG
                         print(f"Deleted empty directory: {dir_path}")
                     
                     except Exception as e:
@@ -364,21 +383,27 @@ class FileServer(rpyc.Service):
             to the database.
         """
         
-        # Add the storage directory to every file received, so to get its
-        # absolute path in the local storage.
-        files = [(os.path.join(self.files_dir, file[0]), file[1]) for file in files]
+        # DEBUG
+        print("Running consistency check...")
         
         # For each file, get its checksum.
         for file in files:
+            # Add the storage directory to the file path, so to get its
+            # absolute path in the local storage.
+            local_path = os.path.join(self.files_dir, file[0])
+            
             # Calculate the checksum of the file.
-            checksum = utils.calculate_checksum(file[0])
+            checksum = utils.calculate_checksum(local_path)
             
             # Try to match the checksums.
             if file[1] != checksum:
-                print(f"File {file} is corrupted.")
+                # DEBUG
+                print(f"File {file[0]} is corrupted.")
                 
                 # Demand database update to the name server.
                 result = self.conn.root.handle_file_inconsistency(self.token, file[0])
+                
+                # ...
                 
                 print(result)
 
