@@ -64,19 +64,16 @@ ROOT_PASSPHRASE = "sym-DFS-project"
 class NameServerService(rpyc.Service):
     """
     Represents the name server, which is the central node in the sym-DFS architecture.
-    Name server is a singleton.
+    The name server is a singleton.
     """
-    
-    # NOTE: sebbene sia stata implementata la disconnessione logica sul database
-    #       in ogni client e file server, è possibile che il name server venga
-    #       disconnesso in modo improvviso prima che le altre componenti possano
-    #       a loro volta disconnettersi in modo sicuro. In casi come questo,
-    #       clients e file servers permangono nel database come connessi.
     
     # NOTE: sqlite3 è di default in modalità "serialized", ciò significa che si
     #       possono eseguire più thread in simultanea senza restrizioni.
     #       https://docs.python.org/3/library/sqlite3.html#sqlite3.threadsafety
     #       Il progetto si può estendere per supportare accesso concorrente al DB.
+    # IMPROVE: per risparmiare codice si potrebbe trovare il modo di definire una
+    #       funzione od un decoratore che nasconda i costrutti try-catch, esponendo
+    #       solamente SQL queries e messaggi di errore.
     
     _instance           = None              # NameServerService active instance.
     _lock_file          = LOCKFILE_PATH     # File used to lock the file server.
@@ -130,8 +127,9 @@ class NameServerService(rpyc.Service):
         """
         Creates the nameserver's database (if it doesn't exist) and initializes it.
         """
-        # NOTE: la creazione del database potrebbe anche essere svolta (sempre
-        #       se necessario) al lancio del server nella funzione __main__.
+        
+        # NOTE: la creazione del database potrebbe anche essere svolta (quando
+        #       necessario) al lancio del server nella funzione __main__.
         
         if os.path.exists(DB_PATH):
             print("Database already exists.")
@@ -242,6 +240,11 @@ class NameServerService(rpyc.Service):
         Returns:
             dict:         The payload of the token.
         """
+        
+        # IMPROVE: questa funzione si dovrebbe spostare nel pacchetto delle
+        #          funzioni di utilità, aggiungendo il parametro per la chiave
+        #          pubblica. Entrambi name server e file servers risparmierebbero
+        #          la scrittura del codice.
         
         try:
             payload = jwt.decode(token, self._public_key, algorithms=["RS384"])
@@ -358,6 +361,7 @@ class NameServerService(rpyc.Service):
         Returns:
             dict:           A dictionary containing the result of the operation.
         """
+        
         # NOTE: sia la creazione che l'autenticazione di un utente root o regolare
         #       vengono fatte dalle stesse funzioni (per semplicità e risparmio di
         #       codice). Nella creazione ci siamo serviti della passphrase per
@@ -570,7 +574,10 @@ class NameServerService(rpyc.Service):
         Returns:
             str:            A message indicating the result of the operation.
         """
-        # TEST cancellazione utente con files.
+        
+        # NOTE: la cancellazion
+        
+        # TEST: cancellazione utente con files.
         
         conn            = sqlite3.connect(self.db_path)
         cursor          = conn.cursor()
@@ -694,6 +701,10 @@ class NameServerService(rpyc.Service):
             str:            A message indicating the result of the operation.
         """
         
+        # TODO: modificare il logout per permetterlo sia ai clients che ai
+        #       file servers, in sostituzione delle funzioni di update di stato
+        #       definite sotto.
+        
         conn            = sqlite3.connect(self.db_path)
         cursor          = conn.cursor()
         
@@ -738,6 +749,12 @@ class NameServerService(rpyc.Service):
         Returns:
             list:           A list of dictionaries containing the file information.
         """
+        
+        # TODO: rimuovere il checksum dalla visualizzazione dei file, oppure
+        #       implementare una nuova visualizzazione con le repliche. Comunque,
+        #       il meccanismo di replica dovrebbe essere trasparente agli utenti
+        #       ed il checksum non è di interesse per l'uso del DFS a fini di
+        #       storage.
         
         conn    = sqlite3.connect(self.db_path)
         cursor  = conn.cursor()
@@ -953,12 +970,10 @@ class NameServerService(rpyc.Service):
             conn.close()
     
     
-    ### Riordino codice OK fino qua <-----
-    
     def exposed_get_file_server_download(self, token, file_path):
         """
         Gets the primary server for a client which wants to download a file.
-        In case the primary file server is offline, the first file server
+        In case the primary file server is offline, the first online file server
         available is returned.
         Args:
             file_path (str):    The absolute file path in the DFS.
@@ -966,29 +981,31 @@ class NameServerService(rpyc.Service):
         Returns:
             dict:               A dictionary containing the file server information.
         """
+        # TEST: download file da server primario e non.
         
         # Get the username from the token.
         payload = self._get_token_payload(token)
         
         if payload is None:
             return {
-                "status": False,
-                "message": f"Error getting file server. Corrupted token."
+                "status":   False,
+                "message":  f"Error getting file server. Corrupted token."
                 }
         else:
             username = payload["username"]
         
-        # Get host and port of the primary server for the file.
         conn    = sqlite3.connect(self.db_path)
         cursor  = conn.cursor()
         
+        # Get host and port of the primary file server for the file.
         try:
             cursor.execute("""
-                SELECT primary_server, address, port
-                FROM files
-                JOIN file_servers ON files.primary_server = file_servers.name
-                WHERE file_path = ?
-                AND owner = ?
+                SELECT f.primary_server, fs.address, fs.port
+                FROM files AS f
+                JOIN file_servers AS fs ON f.primary_server = fs.name
+                WHERE f.file_path = ?
+                AND f.owner = ?
+                AND fs.is_online = 1
                 """,
                 (file_path, username)
                 )
@@ -996,56 +1013,64 @@ class NameServerService(rpyc.Service):
         
         except sqlite3.OperationalError as e:
             print(f"Error selecting record for file:", e)
+            conn.close()
             
             return {
-                "status": False,
-                "message": f"Error getting file server for file '{file_path}'."
+                "status":   False,
+                "message":  f"Error getting file server for file '{file_path}'."
                 }
         
+        # If the primary file server is available, return its information.
+        if result:
+            conn.close()
+            
+            return {
+                "status":   True,
+                "message":  f"Primary server found.",
+                "host":     result[1],
+                "port":     result[2]
+                }
+        
+        
+        # If not, look for an online file server to download the file.        
+        try:
+            cursor.execute("""
+                SELECT fs.name, fs.address, fs.port
+                FROM files AS f
+                JOIN replicas AS r ON f.file_path = r.file_path
+                JOIN file_servers AS fs ON r.server = fs.name
+                WHERE file_path = ?
+                AND fs.is_online = 1
+                """,
+                (file_path,)
+                )
+            result = cursor.fetchone()
+        
+        except sqlite3.OperationalError as e:
+            print(f"Error selecting record for replica of file:", e)
+            conn.close()
+            
+            return {
+                "status":   False,
+                "message":  f"Error getting file server for file '{file_path}'."
+                }
+            
         finally:
             conn.close()
         
-        # Check whether there is a primary server for the file.
-        if result is None:
-            # If not, look for another file server to download the file.
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            try:
-                cursor.execute("""
-                    SELECT server, address, port
-                    FROM files
-                    JOIN replicas ON files.file_path = replicas.file_path
-                    JOIN file_servers ON replicas.server = file_servers.name
-                    WHERE file_path = ?
-                    """,
-                    (file_path,)
-                    )
-                result = cursor.fetchone()
-            
-            except sqlite3.OperationalError as e:
-                print(f"Error selecting record for replica of file:", e)
-                
-                return {
-                    "status": False,
-                    "message": f"Error getting file server for file '{file_path}'."
-                    }
-            
-            finally:
-                conn.close()
-            
-            # If no file server is available, return an error message.
-            if result is None:
-                return {
-                    "status": False,
-                    "message": f"Could'nt find an onlinefile server for file '{file_path}'."
-                    }
+        # If an online file server is available, return its information.
+        if result:
+            return {
+                "status":   True,
+                "message":  f"Online file server found.",
+                "host":     result[1],
+                "port":     result[2]
+                }
         
+        # If no file server is available, return an error message.
         return {
-            "status": True,
-            "message": f"File server found.",
-            "host": result[1],
-            "port": result[2]
+            "status":   False,
+            "message":  f"Couldn't find an available file server for file '{file_path}'."
             }
     
     
@@ -1057,6 +1082,14 @@ class NameServerService(rpyc.Service):
             token (str):        The token of the requestor.
         """
         
+        # NOTE: la cancellazione di un file, come la cancellazione di un utente,
+        #       avviene solo lato-name server (più precisamente nel database).
+        #       I files vengono effettivamente cancellati dai file servers
+        #       tramite un meccanismo periodico di garbage cleaning.
+        
+        # TEST: cancellazione di un file con i nuovi meccanismi di replica e
+        #       garbage cleaning attivi.
+        
         # Get the username from the token.
         payload = self._get_token_payload(token)
         
@@ -1065,10 +1098,10 @@ class NameServerService(rpyc.Service):
         else:
             username = payload["username"]
         
-        # Delete the file from the replicas table.
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        conn    = sqlite3.connect(self.db_path)
+        cursor  = conn.cursor()
         
+        # Delete the file from the replicas table.
         try:
             cursor.execute("""
                 DELETE FROM replicas
@@ -1085,16 +1118,11 @@ class NameServerService(rpyc.Service):
         
         except sqlite3.OperationalError as e:
             print(f"Error deleting record for replica of file:", e)
+            conn.close()
             
             return f"Error deleting replicas of file '{file_path}'."
         
-        finally:
-            conn.close()
-        
-        # Delete the file from the files table.
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
+        # Delete the file from the files table.        
         try:
             cursor.execute("""
                 DELETE FROM files
@@ -1116,9 +1144,12 @@ class NameServerService(rpyc.Service):
         return f"File '{file_path}' deleted."
     
     
+    ### Revisione codice ok fin qua. <-----
+    
+    
     def exposed_list_all_files(self, token):
         """
-        Lists all files in the DFS.
+        Lists all files in the DFS. For root clients use only.
         Args:
             token (str):    The token of the requestor.
         Returns:
@@ -1581,7 +1612,7 @@ class NameServerService(rpyc.Service):
                 FROM files AS f
                 JOIN replicas AS r ON f.file_path = r.file_path
                 JOIN file_servers AS fs ON r.server = fs.name
-                WHERE fs.is_online = 1
+                WHERE fs.is_online = 0
                 AND f.file_path = ?
                 LIMIT 1
                 """,
@@ -1789,6 +1820,15 @@ def periodic_check_activity(hb_timeout):
     Args:
         hb_timeout (int):   The maximum time since the last heartbeat.
     """
+    
+    # NOTE: sebbene sia stata implementata la disconnessione logica sul database
+    #       in ogni client e file server, è possibile che il name server venga
+    #       disconnesso in modo improvviso prima che le altre componenti possano
+    #       a loro volta disconnettersi in modo sicuro. In casi come questo,
+    #       clients e file servers permangono nel database come connessi.
+    #       Il presente meccanismo forza la disconnessione logica (su database)
+    #       di tutti i clients e file servers che non hanno inviato un heartbeat
+    #       nel periodo definito.
     
     print("Checking system entities activity...")
     
