@@ -6,6 +6,8 @@ import jwt
 import heartbeats
 from apscheduler.schedulers.background import BackgroundScheduler
 
+import utils
+
 
 
 class FileServer(rpyc.Service):
@@ -352,6 +354,33 @@ class FileServer(rpyc.Service):
                     
                     except Exception as e:
                         print("Error deleting empty directory")
+    
+    
+    def exposed_consistency_check(self, files):
+        """
+        Checks the consistency of the files stored in the file server.
+        Args:
+            files (list):    A list of the files and their checksums according
+            to the database.
+        """
+        
+        # Add the storage directory to every file received, so to get its
+        # absolute path in the local storage.
+        files = [(os.path.join(self.files_dir, file[0]), file[1]) for file in files]
+        
+        # For each file, get its checksum.
+        for file in files:
+            # Calculate the checksum of the file.
+            checksum = utils.calculate_checksum(file[0])
+            
+            # Try to match the checksums.
+            if file[1] != checksum:
+                print(f"File {file} is corrupted.")
+                
+                # Demand database update to the name server.
+                result = self.conn.root.handle_file_inconsistency(self.token, file[0])
+                
+                print(result)
 
 
 

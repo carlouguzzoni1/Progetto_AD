@@ -171,7 +171,7 @@ class RootClient(BaseClient):
         # If the operation was successful, print the files.
         if result["status"]:
             # Convert the result to a list of dictionaries.
-            headers = ["File", "Size", "Owner", "Checksum", "Uploaded at", "Server"]
+            headers = ["File", "Size", "Owner", "Checksum", "Is corrupted", "Uploaded at", "Server"]
             result["files"]  = [dict(zip(headers, row)) for row in result["files"]]
             
             MAX_CHECKSUM_LEN = 15
@@ -182,6 +182,7 @@ class RootClient(BaseClient):
                     "Size"          : f["Size"],
                     "Owner"         : f["Owner"],
                     "Checksum"      : utils.truncate(f["Checksum"], MAX_CHECKSUM_LEN),
+                    "Is corrupted"  : f["Is corrupted"],
                     "Uploaded at"   : f["Uploaded at"],
                     "Server": f["Server"]
                 }
