@@ -5,7 +5,6 @@ from getpass import getpass
 import jwt
 import heartbeats
 from apscheduler.schedulers.background import BackgroundScheduler
-
 import utils
 
 
@@ -16,7 +15,29 @@ class FileServer(rpyc.Service):
     architecture.
     """
     
+    # NOTE: per ora è permessa solo la cancellazione di utenti. Il progetto
+    #       è pensato per simulare un piccolo DFS, quindi non dovrebbe
+    #       accadere spesso che un file server venga rimosso.
+    #       Nel caso, implementare la cancellazione dei file servers è
+    #       un task relativamente semplice. Esempio:
+    #           1. aggiungere il campo is_deleted a tutti i files
+    #           2. assegnare ad un altro primary file server (tra quelli
+    #              che ospitano una replica) tutti i files che erano
+    #              assegnati al file server da cancellare
+    #           3. marcare tutti i files a cui non si è trovata una nuova
+    #              sistemazione come "deleted"
+    #           4. cancellare le entry relative al file server e le repliche
+    #              in suo possesso
+    #           5. facoltativo: cancellare le directory di storage locali
+    
     def __init__(self, ns_host, ns_port):
+        """
+        Initializes the file server.
+        Args:
+            ns_host (str):  The hostname or IP address of the name server.
+            ns_port (int):  The port number of the name server.
+        """
+        
         self.ns_host        = ns_host
         self.ns_port        = ns_port
         self.conn           = None
@@ -34,6 +55,9 @@ class FileServer(rpyc.Service):
         (to False) and close connection upon deletion.
         """
         
+        # TODO: implementare un meccanismo di spegnimento del file server basato
+        #       su segnali.
+        
         print("Shutting down file server...")
         
         # Stop the scheduler.
@@ -44,17 +68,17 @@ class FileServer(rpyc.Service):
             self.scheduler = None
         
         # Update the file server's status in the name server's database.
-        print("Updating client status...")
+        print("Logging out...")
         
         try:
-            self.conn.root.update_file_server_status(self.name, False, self.token)
+            self.conn.root.logout(self.token)
         
         except Exception as e:
-            print(f"Error updating file server status: {e}")
+            print(f"Error logging out: {e}")
         
-        finally:
-            # Close the connection.
-            self.conn.close()
+        # Close the connection.
+        print("Closing the connection to the name server...")
+        self.conn.close()
     
     
     def _get_token_payload(self, token):

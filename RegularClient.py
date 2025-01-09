@@ -87,6 +87,8 @@ class RegularClient(BaseClient):
     def logout(self):
         """Logs out the current user."""
         
+        # TEST: logout di un client attivo e successivo login con un altro.
+        
         if self.user_is_logged:
             # Update the user status in the name server's database.
             result = self.conn.root.logout(self.token)

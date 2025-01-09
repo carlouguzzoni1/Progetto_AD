@@ -23,7 +23,8 @@ class BaseClient(ABC):
     #       precedenza scaricato.
     
     def __init__(self, host, port):
-        """Initializes the client.
+        """
+        Initializes the client.
         Args:
             host (str): The hostname or IP address of the name server.
             port (int): The port number of the name server.
@@ -44,28 +45,31 @@ class BaseClient(ABC):
         (to False) and close connection upon deletion.
         """
         
+        # TODO: implementare un meccanismo di spegnimento del client basato
+        #       su segnali.
+        
         print("Shutting down client...")
         
         # Stop the scheduler.
         print("Shutting down the job scheduler...")
         if self.scheduler:
             self.scheduler.remove_all_jobs()
-            # self.scheduler.shutdown()
+            self.scheduler.shutdown()
             self.scheduler = None
         
         # Update the client's status in the name server's database.
         if self.user_is_logged:
-            print("Updating client status...")
+            print("Logging out...")
             
             try:
-                self.conn.root.update_client_status(self.logged_username, False, self.token)
+                self.conn.root.logout(self.token)
             
             except Exception as e:
-                print(f"Error updating client status: {e}")
-            
-            finally:
-                # Close the connection.
-                self.conn.close()
+                print(f"Error logging out: {e}")
+        
+        # Close the connection.
+        print("Closing the connection to the name server...")
+        self.conn.close()
     
     
     def connect(self):
