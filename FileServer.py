@@ -30,6 +30,15 @@ class FileServer(rpyc.Service):
     #              in suo possesso
     #           5. facoltativo: cancellare le directory di storage locali
     
+    # TODO: nel garbage cleaning, si potrebbe controllare la presenza di
+    #       eventuali files che secondo il name server dovrebbero trovarsi
+    #       nello storage locale, ma che non sono stati trovati. Questi
+    #       dovrebbero poi essere marcati come corrotti. Fare anche testing.
+    
+    # TODO: si dovrebbe implementare un meccanismo per rendere le RPC definite
+    #       appositamente per l'interazione name server/file server inutilizzabili
+    #       al client.
+    
     def __init__(self, ns_host, ns_port):
         """
         Initializes the file server.

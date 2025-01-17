@@ -141,8 +141,9 @@ class NameServerService(rpyc.Service):
         Creates the nameserver's database (if it doesn't exist) and initializes it.
         """
         
-        # NOTE: la creazione del database potrebbe anche essere svolta (quando
-        #       necessario) al lancio del server nella funzione __main__.
+        # IMPROVE: la creazione del database potrebbe anche essere svolta
+        #          (quando necessario) al lancio del server nella funzione
+        #           __main__.
         
         if os.path.exists(DB_PATH):
             print("Database already exists.")
@@ -694,7 +695,8 @@ class NameServerService(rpyc.Service):
         """
         
         # NOTE: il logout è una RPC unica per clients e file servers, per
-        #       rendere il codice piu' semplice.
+        #       rendere il codice piu' semplice. Ciò che cambia di fatto è
+        #       solamente la tabella da aggiornare.
         
         conn            = sqlite3.connect(self.db_path)
         cursor          = conn.cursor()
@@ -1627,8 +1629,6 @@ class NameServerService(rpyc.Service):
 
 ##### PERIODIC JOBS #####
 
-# Pulizia del codice ok fino qua <-----
-
 
 def periodic_replication_job(K):
     """
@@ -1637,12 +1637,15 @@ def periodic_replication_job(K):
         K (int):    The number of times to replicate the files.
     """
     
+    # TEST: replicazione di file con primary server offline.
+    
     print("Replicating files...")
     
     conn    = sqlite3.connect(DB_PATH)
     cursor  = conn.cursor()
     
-    # Select the files that need to be replicated and their primary server.
+    # Select the files that need to be replicated (IE those that have less than
+    # K online replicas) and their primary server.
     try:
         cursor.execute("""
             SELECT 
@@ -1681,6 +1684,7 @@ def periodic_replication_job(K):
                 FROM file_servers AS fs
                 JOIN files AS f ON fs.name = f.primary_server
                 WHERE f.file_path = ?
+                AND fs.is_online = 1
                 """,
                 (file_path, )
                 )
@@ -1698,8 +1702,9 @@ def periodic_replication_job(K):
             
             continue
         
-        # Select address and port of the file servers which don't have the file,
-        # up to (K - active_replicas).
+        # Select address and port of online file servers which don't have the
+        # file, up to (K - active_replicas). Those servers must be different
+        # from those that already have the file.
         try:
             cursor.execute("""
                 SELECT fs.name, fs.address, fs.port
@@ -1729,7 +1734,8 @@ def periodic_replication_job(K):
             
             continue
         else:
-            # Send file servers' coordinates to the primary server if possible.
+            # Send file servers' coordinates to the primary server if possible,
+            # so that it can send them the file.
             # Try to connect to the primary server.
             try:
                 server = rpyc.connect(primary_server[0], primary_server[1])
@@ -1826,9 +1832,8 @@ def periodic_check_activity(hb_timeout):
 
 def periodic_trigger_garbage_collection():
     """
-    Periodically sends to the active file servers the files they should have,
-    so that they can delete those files and directories that are not needed
-    anymore.
+    Periodically sends to the name server the list of files that are needed, so
+    that it can delete those files and directories that are not needed anymore.
     """
     
     print("Triggering garbage collection on active file servers...")
@@ -1960,21 +1965,27 @@ def periodic_trigger_consistency_check():
 
 
 if __name__ == "__main__":
+    
+    # IMPROVE: anche numero di repliche e altri parametri di configurazione
+    #          dovrebbero essere spostati su variabili d'ambiente o files di
+    #          configurazione.
+    
     print("Welcome to sym-DFS Project Server.")
     
-    # Mantain K replicas.
-    K = 2
-    # Receive heart-beats every HB_TIMEOUT seconds.
-    HB_TIMEOUT = 30
+    K           = 2     # Mantain K replicas.
+    HB_TIMEOUT  = 30    # Receive heart-beats every HB_TIMEOUT seconds.
+    PR_TIMEOUT  = 30    # Start periodic replication every PR_TIMEOUT seconds.
+    GC_TIMEOUT  = 30    # Start garbage collection every GC_TIMEOUT seconds.
+    CC_TIMEOUT  = 30    # Start consistency check every CC_TIMEOUT seconds.
     
-    scheduler = BackgroundScheduler()
+    scheduler   = BackgroundScheduler()   # Job scheduler.
     
     print("Starting periodic replication job...")
     scheduler.add_job(
         periodic_replication_job,
         args=[K],
         trigger='interval',
-        seconds=30
+        seconds=PR_TIMEOUT
         )
     
     print("Starting periodic check activity job...")
@@ -1982,21 +1993,21 @@ if __name__ == "__main__":
         periodic_check_activity,
         args=[HB_TIMEOUT],
         trigger='interval',
-        seconds=30
+        seconds=HB_TIMEOUT
         )
     
     print("Starting periodic garbage collection job...")
     scheduler.add_job(
         periodic_trigger_garbage_collection,
         trigger='interval',
-        seconds=30
+        seconds=GC_TIMEOUT
     )
     
     print("Starting periodic consistency check job...")
     scheduler.add_job(
         periodic_trigger_consistency_check,
         trigger='interval',
-        seconds=30
+        seconds=CC_TIMEOUT
     )
     
     scheduler.start()
