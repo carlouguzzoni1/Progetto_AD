@@ -1,5 +1,5 @@
 import hashlib
-import uuid
+import sys
 
 
 
@@ -21,16 +21,6 @@ def calculate_checksum(file_path):
     return sha256.hexdigest()
 
 
-def generate_uuid():
-    """
-    Generates a UUID randomly.
-    Returns:
-        str: The generated UUID.
-    """
-    
-    return str(uuid.uuid4())
-
-
 def truncate(value, max_length):
     """
     Truncates a string to a maximum length.
@@ -42,3 +32,19 @@ def truncate(value, max_length):
     """
     
     return value[:max_length] + "..." if len(value) > max_length else value
+
+
+def handle_keyboard_interrupt_client(signum, frame, client):
+    """
+    Handles a KeyboardInterrupt exception.
+    Args:
+        signum (int):       The signal number.
+        frame (object):     The stack frame.
+        client (object):    The client object.
+    """
+    
+    print("\nExiting due to keyboard interrupt...")
+    
+    client._cleanup()   # Logout + state reset + scheduler shutdown.
+    
+    sys.exit(0)         # Calls __del__ -> disconnection.

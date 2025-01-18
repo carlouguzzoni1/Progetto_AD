@@ -4,23 +4,17 @@ import rpyc
 from tabulate import tabulate
 import utils
 from getpass import getpass
+from apscheduler.schedulers.background import BackgroundScheduler
+
+
+
+# IMPROVE: da spostare su variabili d'ambiente/file di configurazione.
+CLIENT_ROOT_DIR = "./CLI"
 
 
 
 class BaseClient(ABC):
     """Abstract base class for client classes."""
-    
-    # NOTE: le procedure di visualizzazione/upload/download/cancellazione di files
-    #       dovrebbero essere le stesse per regular e root clients, in quanto si
-    #       tratta di funzionalità di base.
-    
-    # NOTE: la cancellazione di un utente, per ora, avviene solo nel database del
-    #       name server. Si suppone che l'utente che ne cancella un altro sia di
-    #       fatto la stessa persona, ma non si fanno supposizioni sulla località
-    #       di tale host. Per questo motivo, il client non si accolla l'onere di
-    #       cancellare la directory locale per tale utente, che pur non essendo
-    #       più registrato, potrà ugualmente usufruire dei files che aveva in
-    #       precedenza scaricato.
     
     def __init__(self, host, port):
         """
@@ -30,59 +24,72 @@ class BaseClient(ABC):
             port (int): The port number of the name server.
         """
         
-        self.ns_host            = host
-        self.ns_port            = port
-        self.conn               = None
-        self.user_is_logged     = False
-        self.logged_username    = None
-        self.files_dir          = None
-        self.token              = None
-        self.scheduler          = None
+        # The root directory of the client.
+        self.client_root_dir    = CLIENT_ROOT_DIR
+        self.ns_host            = host  # Host for the name server.
+        self.ns_port            = port  # Port for the name server.
+        self.conn               = None  # Connection to the name server.
+        self.user_is_logged     = False # Whether the user is logged in.
+        self.logged_username    = None  # The username of the logged in user.
+        self.files_dir          = None  # The directory of the logged in user.
+        self.token              = None  # The JWT token of the logged in user.
+        self.scheduler          = None  # The job scheduler.
     
     
     def __del__(self):
-        """Tries to update the client's status in the name server's database
-        (to False) and close connection upon deletion.
-        """
-        
-        # TODO: implementare un meccanismo di spegnimento del client basato
-        #       su segnali.
+        """Closes the connection to the name server upon deletion."""
         
         print("Shutting down client...")
-        
-        # Stop the scheduler.
-        print("Shutting down the job scheduler...")
-        if self.scheduler:
-            self.scheduler.remove_all_jobs()
-            self.scheduler.shutdown()
-            self.scheduler = None
-        
-        # Update the client's status in the name server's database.
-        if self.user_is_logged:
-            print("Logging out...")
-            
-            try:
-                self.conn.root.logout(self.token)
-            
-            except Exception as e:
-                print(f"Error logging out: {e}")
         
         # Close the connection.
         print("Closing the connection to the name server...")
         self.conn.close()
     
     
+    def _cleanup(self):
+        """Cleans up the client's state upon logout or keyboard interrupt."""
+        
+        # Update the user status in the name server's database.
+        print("Logging out...")
+        
+        try:
+            result = self.conn.root.logout(self.token)
+            print(result)
+        
+        except Exception as e:
+            print(f"Error logging out: {e}")
+        
+        # Reset the client's state.
+        print("Resetting the client's state...")
+        
+        self.user_is_logged     = False
+        self.logged_username    = None
+        self.files_dir          = None
+        self.token              = None
+        
+        # Stop the scheduler.
+        print("Shutting down the job scheduler...")
+        
+        self.scheduler.remove_all_jobs()
+        self.scheduler.shutdown()
+        self.scheduler          = None
+    
+    
     def connect(self):
         """Establishes a connection to the name server."""
         
+        print("Connecting to the name server...")
+        
         try:
-            print("Connecting to the name server...")
             self.conn = rpyc.connect(self.ns_host, self.ns_port)
             print("Connection established.")
         
         except Exception as e:
             print(f"Error connecting to the server: {e}")
             exit(1)
+    
+    
+    ##### ABSTRACT METHODS #####
     
     
     @abstractmethod
@@ -92,6 +99,20 @@ class BaseClient(ABC):
         pass
     
     
+    @abstractmethod
+    def main_prompt(self):
+        """Displays the main prompt for the clients."""
+        
+        pass
+    
+    
+    ##### BASE CLIENT FUNCTIONALITIES #####
+    
+    
+    # NOTE: le procedure di creazione/eliminazione di utenti sono le stesse per
+    #       regular e root clients, in quanto si tratta di funzionalità di base.
+    
+    
     def create_user(self):
         """
         Creates a new regular user.
@@ -99,29 +120,35 @@ class BaseClient(ABC):
             bool: True if the user was created successfully, False otherwise.
         """
         
-        username = input("Insert username: ")
-        password = getpass("Insert password: ")
-        result = self.conn.root.create_user(username, password)
+        username    = input("Insert username: ")
+        password    = getpass("Insert password: ")
+        result      = self.conn.root.create_user(username, password)
         print(result["message"])
     
     
     def delete_user(self):
         """Deletes a regular user."""
         
+        # NOTE: la cancellazione di un utente, per ora, avviene solo nel database del
+        #       name server. Si suppone che l'utente che ne cancella un altro sia di
+        #       fatto la stessa persona, ma non si fanno supposizioni sull'ubicazione
+        #       di tale host. Per questo motivo, il client non si accolla l'onere di
+        #       cancellare la directory locale per tale utente, che pur non essendo
+        #       più registrato, potrà ugualmente usufruire dei files che aveva in
+        #       precedenza scaricato.
+        
         if not self.user_is_logged:
             print("You must be logged in to delete a user.")
         else:
-            username = input("Insert username: ")
-            password = getpass("Insert password: ")
-            result = self.conn.root.delete_user(username, password)
+            username    = input("Insert username: ")
+            password    = getpass("Insert password: ")
+            result      = self.conn.root.delete_user(username, password)
             print(result)
     
     
-    @abstractmethod
-    def main_prompt(self):
-        """Displays the main prompt for the clients."""
-        
-        pass
+    # NOTE: le procedure di visualizzazione/upload/download/cancellazione di files
+    #       sono le stesse per regular e root clients, in quanto si tratta di
+    #       funzionalità di base.
     
     
     def list_files(self):

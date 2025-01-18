@@ -71,6 +71,8 @@ class RootClient(BaseClient):
     def __del__(self):
         """Removes the lock file when the root client is deleted."""
         
+        super().__del__()
+        
         # Remove the lock file.
         if os.path.exists(self._lock_file):
             print("Removing lock file...")

@@ -698,6 +698,8 @@ class NameServerService(rpyc.Service):
         #       rendere il codice piu' semplice. Ciò che cambia di fatto è
         #       solamente la tabella da aggiornare.
         
+        # TODO: separare i metodi per clients e file servers.
+        
         conn            = sqlite3.connect(self.db_path)
         cursor          = conn.cursor()
         
