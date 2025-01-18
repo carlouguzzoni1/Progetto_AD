@@ -8,7 +8,7 @@ def send_activity_heartbeat(conn, token):
     """
     
     try:
-        conn.root.activity_heartbeat(token)
+        conn.root.receive_activity_heartbeat(token)
         
     except Exception as e:
         print("Error sending heartbeat:", e)

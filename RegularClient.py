@@ -5,6 +5,13 @@ from BaseClient import BaseClient
 from getpass import getpass
 import heartbeats
 from apscheduler.schedulers.background import BackgroundScheduler
+import utils
+from functools import partial
+import signal
+
+
+
+CLIENT_BASE_DIR = "./CLI"
 
 
 
@@ -26,6 +33,9 @@ class RegularClient(BaseClient):
         super().__init__(host, port)
     
     
+    ##### ABSTRACT METHODS IMPLEMENTATION #####
+    
+    
     def display_commands(self):
         """Displays the available commands for the regular clients."""
         
@@ -43,64 +53,6 @@ class RegularClient(BaseClient):
         exit                Exit the program
         show-commands       Show commands
         """)
-    
-    
-    def login(self):
-        """Authenticates a regular user."""
-        
-        # Check whether a user is already logged in.
-        if self.user_is_logged:
-            print("Cannot login: an user is already logged in.")
-            return
-        
-        username    = input("Insert username: ")
-        password    = getpass("Insert password: ")
-        result      = self.conn.root.authenticate_user(username, password)
-        
-        if result["status"]:
-            self.user_is_logged     = True
-            self.logged_username    = username
-            self.files_dir          = "./CLI/{}".format(username)
-            self.token              = result["token"]
-            self.scheduler          = BackgroundScheduler()
-            
-            # Add activity heartbeat job.
-            print("Starting periodic activity heartbeat job...")
-            self.scheduler.add_job(
-                heartbeats.send_activity_heartbeat,
-                args=[self.conn, self.token],
-                trigger='interval',
-                seconds=30,
-                id="activity_heartbeat"
-                )
-            
-            # Start the scheduler.
-            self.scheduler.start()
-            
-            # Check whether the client actually has a local files directory.
-            if not os.path.exists(self.files_dir):
-                os.mkdir(self.files_dir)   # Create the directory.
-        
-        print(result["message"])
-    
-    
-    def logout(self):
-        """Logs out the current user."""
-        
-        if self.user_is_logged:
-            # Update the user status in the name server's database.
-            result = self.conn.root.logout(self.token)
-            # Reset the client's state.
-            self.user_is_logged     = False
-            self.logged_username    = None
-            self.files_dir          = None
-            self.token              = None
-            self.scheduler.remove_all_jobs()
-            self.scheduler.shutdown()
-            self.scheduler          = None
-            print(result)
-        else:
-            print("No user is logged in.")
     
     
     def main_prompt(self):
@@ -135,19 +87,79 @@ class RegularClient(BaseClient):
                     self.delete()
                 case "exit":
                     print("Exiting...")
-                    # Log out before exiting.
-                    self.logout()
-                    # Close the connection.
-                    self.conn.close()
+                    self.logout()       # Log out before exiting.
+                    # Connection is closed upon deletion, which happens on exit.
                     break
                 case "show-commands":
                     self.display_commands()
                 case _:
                     print("Unknown command. Type 'show-commands' for a list of commands.")
+    
+    
+    ##### USER INTERACTION METHODS #####
+    
+    
+    def login(self):
+        """Authenticates a regular user."""
+        
+        # Check whether a user is already logged in.
+        if self.user_is_logged:
+            print("Cannot login: an user is already logged in.")
+            return
+        
+        # Get username and password from the user.
+        username    = input("Insert username: ")
+        password    = getpass("Insert password: ")
+        
+        # Authenticate the user.
+        result      = self.conn.root.authenticate_user(username, password)
+        
+        # Check whether the authentication was successful.
+        if result["status"]:
+            self.user_is_logged     = True
+            self.logged_username    = username
+            self.files_dir          = os.path.join(self.client_root_dir, username)
+            self.token              = result["token"]
+            self.scheduler          = BackgroundScheduler()
+            
+            # Add activity heartbeat job.
+            print("Starting periodic activity heartbeat job...")
+            self.scheduler.add_job(
+                heartbeats.send_activity_heartbeat,
+                args=[self.conn, self.token],
+                trigger='interval',
+                seconds=30,
+                id="activity_heartbeat"
+                )
+            
+            # Start the scheduler.
+            self.scheduler.start()
+            
+            # If this user doesn't have a directory, create it.
+            if not os.path.exists(self.files_dir):
+                os.mkdir(self.files_dir)
+        
+        print(result["message"])
+    
+    
+    def logout(self):
+        """Logs out the current user."""
+        
+        # TEST: logout di un client attivo e successivo login con un altro.
+        
+        if self.user_is_logged:
+            self._cleanup()
+        else:
+            print("No user is logged in.")
 
 
 
 if __name__ == "__main__":
+    # Create the client.
     client = RegularClient(sys.argv[1], int(sys.argv[2]))
     
+    # Handle keyboard interrupts.
+    signal.signal(signal.SIGINT, partial(utils.handle_keyboard_interrupt_client, client=client))
+    
+    # Prompt is displayed until user manually exits.
     client.main_prompt()
