@@ -1,3 +1,4 @@
+import datetime
 import hashlib
 import sys
 
@@ -48,3 +49,13 @@ def handle_keyboard_interrupt_client(signum, frame, client):
     client._cleanup()   # Logout + state reset + scheduler shutdown.
     
     sys.exit(0)         # Calls __del__ -> disconnection.
+
+
+def current_timestamp():
+    """
+    Returns the current timestamp in the format %Y-%m-%d %H:%M:%S.
+    Returns:
+        str: The current timestamp in the format %Y-%m-%d %H:%M:%S.
+    """
+    
+    return datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")

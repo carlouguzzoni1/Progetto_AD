@@ -1,3 +1,4 @@
+import datetime
 import rpyc.lib
 from rpyc.utils.server import ThreadedServer
 import os
@@ -9,6 +10,7 @@ import jwt
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
 from apscheduler.schedulers.background import BackgroundScheduler
+import utils
 
 
 
@@ -773,12 +775,6 @@ class NameServerService(rpyc.Service):
             list:           A list of dictionaries containing the file information.
         """
         
-        # TODO: rimuovere il checksum dalla visualizzazione dei file, oppure
-        #       implementare una nuova visualizzazione con le repliche. Comunque,
-        #       il meccanismo di replica dovrebbe essere trasparente agli utenti
-        #       ed il checksum non è di interesse per l'uso del DFS a fini di
-        #       storage.
-        
         conn    = sqlite3.connect(self.db_path)
         cursor  = conn.cursor()
         
@@ -798,7 +794,7 @@ class NameServerService(rpyc.Service):
         # Get the files owned by the user.
         try:
             cursor.execute("""
-                SELECT file_path, size, checksum, is_corrupted, uploaded_at, primary_server
+                SELECT file_path, size, is_corrupted, uploaded_at, primary_server
                 FROM files
                 WHERE owner = ?
                 """,
@@ -1641,7 +1637,7 @@ def periodic_replication_job(K):
     
     # TEST: replicazione di file con primary server offline.
     
-    print("Replicating files...")
+    print(f"[{utils.current_timestamp()}] Replicating files...")
     
     conn    = sqlite3.connect(DB_PATH)
     cursor  = conn.cursor()
@@ -1788,7 +1784,7 @@ def periodic_check_activity(hb_timeout):
     #       di tutti i clients e file servers che non hanno inviato un heartbeat
     #       nel periodo definito.
     
-    print("Checking system entities activity...")
+    print(f"[{utils.current_timestamp()}] Checking system entities activity...")
     
     conn    = sqlite3.connect(DB_PATH)
     cursor  = conn.cursor()
@@ -1838,7 +1834,7 @@ def periodic_trigger_garbage_collection():
     that it can delete those files and directories that are not needed anymore.
     """
     
-    print("Triggering garbage collection on active file servers...")
+    print(f"[{utils.current_timestamp()}] Triggering garbage collection on active file servers...")
     
     conn    = sqlite3.connect(DB_PATH)
     cursor  = conn.cursor()
@@ -1906,7 +1902,7 @@ def periodic_trigger_consistency_check():
     they store.
     """
     
-    print("Triggering consistency check on active file servers...")
+    print(f"[{utils.current_timestamp()}] Triggering consistency check on active file servers...")
     
     conn    = sqlite3.connect(DB_PATH)
     cursor  = conn.cursor()
