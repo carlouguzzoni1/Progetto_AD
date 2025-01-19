@@ -87,7 +87,7 @@ class RegularClient(BaseClient):
                     self.delete()
                 case "exit":
                     print("Exiting...")
-                    self.logout()       # Log out before exiting.
+                    self.logout()   # Log out before exiting.
                     # Connection is closed upon deletion, which happens on exit.
                     break
                 case "show-commands":

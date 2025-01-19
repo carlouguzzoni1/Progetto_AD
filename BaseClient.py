@@ -164,16 +164,13 @@ class BaseClient(ABC):
             # If the operation was successful, print the result.
             if result["status"]:
                 # Convert the result to a list of dictionaries.
-                headers = ["File", "Size", "Checksum", "Is corrupted", "Uploaded at", "Primary Server"]
-                result["files"]  = [dict(zip(headers, row)) for row in result["files"]]
-                
-                MAX_CHECKSUM_LEN = 15
-                
+                headers         = ["File", "Size", "Is corrupted", "Uploaded at", "Primary Server"]
+                result["files"] = [dict(zip(headers, row)) for row in result["files"]]
+                                
                 result["files"] = [
                     {
                         "File"          : f["File"],
                         "Size"          : f["Size"],
-                        "Checksum"      : utils.truncate(f["Checksum"], MAX_CHECKSUM_LEN),
                         "Is corrupted"  : f["Is corrupted"],
                         "Uploaded at"   : f["Uploaded at"],
                         "Primary Server": f["Primary Server"]
@@ -226,8 +223,8 @@ class BaseClient(ABC):
         
         # Upload the file.
         with open(client_path, "rb") as file:
-            file_data = file.read()
-            upload_result = fs_conn.root.store_file(
+            file_data       = file.read()
+            upload_result   = fs_conn.root.store_file(
                 server_path,
                 file_data,
                 self.token
@@ -263,6 +260,7 @@ class BaseClient(ABC):
             server_path (str): The absolute path of the file to download on the DFS.
         """
         
+        # Ask the name server for a file server to download the file.
         result      = self.conn.root.get_file_server_download(self.token, server_path)
         
         print(result["message"])
@@ -285,7 +283,7 @@ class BaseClient(ABC):
         dir         = self.files_dir
         
         for directory in server_path.split("/")[1:-1]:
-            dir         = os.path.join(dir, directory)
+            dir     = os.path.join(dir, directory)
             
             if not os.path.exists(dir):
                 os.mkdir(dir)

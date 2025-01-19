@@ -47,15 +47,15 @@ class FileServer(rpyc.Service):
             ns_port (int):  The port number of the name server.
         """
         
-        self.ns_host        = ns_host
-        self.ns_port        = ns_port
-        self.conn           = None
-        self.host           = None
-        self.port           = None
-        self.files_dir      = None
-        self.name           = None
-        self.token          = None
-        self._public_key    = None
+        self.ns_host        = ns_host   # Host for the name server.
+        self.ns_port        = ns_port   # Port for the name server.
+        self.conn           = None      # Connection to the name server.
+        self.host           = None      # Host for the file server.
+        self.port           = None      # Port for the file server.
+        self.files_dir      = None      # The storage directory of the file server.
+        self.name           = None      # The name of the file server.
+        self.token          = None      # The JWT token of the file server.
+        self._public_key    = None      # Public key for JWT tokens.
     
     
     def __del__(self):

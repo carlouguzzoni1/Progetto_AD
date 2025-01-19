@@ -1,3 +1,5 @@
+from functools import partial
+import signal
 import sys
 from BaseClient import BaseClient
 import os
@@ -8,19 +10,13 @@ from apscheduler.schedulers.background import BackgroundScheduler
 import heartbeats
 
 
-
+# IMPROVE: spostare in file di configurazione/variabile d'ambiente.
 LOCKFILE_PATH = "./NS/rootclient.lock"
 
 
 
 class RootClient(BaseClient):
     """Client class for root user. Root client is a singleton."""
-    
-    # NOTE: la procedura di creazione di un client root utilizza lo stesso metodo
-    #       esposto dal file server per la creazione di un client regolare. In
-    #       ogni caso, per la creazione di un utente root è richiesta una certa
-    #       passphrase, definita solo lato-server e non direttamente accessibile
-    #       dai client regolari.
     
     # IMPROVE: si potrebbe consentire al root client di cancellare files od utenti,
     #          in modo forzato, qualora essi violassero le policy dell'amministratore.
@@ -71,12 +67,16 @@ class RootClient(BaseClient):
     def __del__(self):
         """Removes the lock file when the root client is deleted."""
         
+        # Call the destructor of the parent class.
         super().__del__()
         
         # Remove the lock file.
         if os.path.exists(self._lock_file):
             print("Removing lock file...")
             os.remove(self._lock_file)
+    
+    
+    ##### ABSTRACT METHODS IMPLEMENTATION #####
     
     
     def display_commands(self):
@@ -99,12 +99,64 @@ class RootClient(BaseClient):
         """)
     
     
+    def main_prompt(self):
+        """Displays the main prompt for the root client."""
+        
+        self.display_commands() # Display the available commands.
+        
+        while True:
+            # Get user input.
+            command = input(
+                "({})> ".format(self.logged_username)
+            )
+            
+            # Execute the command.
+            match command:
+                case "create-user":
+                    self.create_user()
+                case "delete-user":
+                    self.delete_user()
+                case "list-files":
+                    self.list_files()
+                case "upload":
+                    self.upload()
+                case "download":
+                    self.download()
+                case "delete-file":
+                    self.delete()
+                case "list-all-files":
+                    self.list_all_files()
+                case "list-all-clients":
+                    self.list_all_clients()
+                case "list-all-fs":
+                    self.list_all_file_servers()
+                case "exit":
+                    print("Exiting...")
+                    # Update the user status in the name server's database.
+                    self._cleanup() # Log out before exiting.
+                    # Connection is closed upon deletion, which happens on exit.
+                    break
+                case "show-commands":
+                    self.display_commands()
+                case _:
+                    print("Unknown command. Type 'show-commands' for a list of commands.")
+    
+    
+    ##### USER INTERACTION METHODS #####
+    
+    
     def login_as_root(self):
         """
         Authenticates the root user.
         This procedure is different from the login procedure for regular users,
         as it is mandatory and launched at the start of the program.
         """
+        
+        # NOTE: la procedura di creazione di un client root utilizza lo stesso metodo
+        #       esposto dal file server per la creazione di un client regolare. In
+        #       ogni caso, per la creazione di un utente root è richiesta una certa
+        #       passphrase, definita solo lato-server e non direttamente accessibile
+        #       dai client regolari.
         
         self.connect()  # Connect to the name server.
         
@@ -113,10 +165,12 @@ class RootClient(BaseClient):
             # If not, create one.
             print("No root user was found. Creating one...")
             
+            # Get username, password and root passphrase from the user.
             username        = input("Insert username: ")
             password        = getpass("Insert password: ")
             root_passphrase = getpass("Insert root passphrase: ")
             
+            # Try to create the root user.
             result  = self.conn.root.create_user(
                 username,
                 password,
@@ -129,11 +183,15 @@ class RootClient(BaseClient):
         # Login as root.
         while True:
             print("Login as root...")
+            
+            # Get username and password from the user.
             username = input("Insert username: ")
             password = getpass("Insert password: ")
             
+            # Authenticate the root user.
             result = self.conn.root.authenticate_user(username, password)
             
+            # Check whether the authentication was successful.
             if result["status"]:
                 self.user_is_logged     = True
                 self.logged_username    = username
@@ -163,6 +221,9 @@ class RootClient(BaseClient):
             print(result["message"])
     
     
+    ##### ROOT ONLY COMMANDS #####
+    
+    
     def list_all_files(self):
         """Lists all files in the DFS."""
         
@@ -184,9 +245,9 @@ class RootClient(BaseClient):
                     "Size"          : f["Size"],
                     "Owner"         : f["Owner"],
                     "Checksum"      : utils.truncate(f["Checksum"], MAX_CHECKSUM_LEN),
-                    "Is corrupted"  : f["Is corrupted"],
+                    "Is corrupted"  : "Y" if f["Is corrupted"] else "N",
                     "Uploaded at"   : f["Uploaded at"],
-                    "Server": f["Server"]
+                    "Server"        : f["Server"]
                 }
                 for f in result["files"]
             ]
@@ -244,54 +305,15 @@ class RootClient(BaseClient):
             ]
             
             print(tabulate(result["file_servers"], headers="keys"))
-    
-    def main_prompt(self):
-        """Displays the main prompt for the root client."""
-        
-        self.display_commands() # Display the available commands.
-        
-        while True:
-            # Get user input.
-            command = input(
-                "({})> ".format(self.logged_username)
-            )
-            
-            # Execute the command.
-            match command:
-                case "create-user":
-                    self.create_user()
-                case "delete-user":
-                    self.delete_user()
-                case "list-files":
-                    self.list_files()
-                case "upload":
-                    self.upload()
-                case "download":
-                    self.download()
-                case "delete-file":
-                    self.delete()
-                case "list-all-files":
-                    self.list_all_files()
-                case "list-all-clients":
-                    self.list_all_clients()
-                case "list-all-fs":
-                    self.list_all_file_servers()
-                case "exit":
-                    print("Exiting...")
-                    # Update the user status in the name server's database.
-                    self.conn.root.logout(self.token)
-                    # Close the connection.
-                    self.conn.close()
-                    break
-                case "show-commands":
-                    self.display_commands()
-                case _:
-                    print("Unknown command. Type 'show-commands' for a list of commands.")
 
 
 
 if __name__ == "__main__":
+    # Create the root client.
     root_client = RootClient(sys.argv[1], int(sys.argv[2]))
     
-    root_client.login_as_root() # Login as root.
-    root_client.main_prompt()
+    # Handle keyboard interrupts.
+    signal.signal(signal.SIGINT, partial(utils.handle_keyboard_interrupt_client, client=root_client))
+    
+    root_client.login_as_root() # Mandatory login procedure for root users.
+    root_client.main_prompt()   # Prompt is displayed until user manually exits.
