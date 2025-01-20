@@ -33,11 +33,6 @@ class FileServer(rpyc.Service):
     #              in suo possesso
     #           5. facoltativo: cancellare le directory di storage locali
     
-    # TODO: nel consistency check, si potrebbe controllare la presenza di
-    #       eventuali files che secondo il name server dovrebbero trovarsi
-    #       nello storage locale, ma che non sono stati trovati. Questi
-    #       dovrebbero poi essere marcati come corrotti. Fare anche testing.
-    
     # TODO: si dovrebbe implementare un meccanismo per rendere le RPC definite
     #       appositamente per l'interazione name server/file server inutilizzabili
     #       al client.
@@ -378,8 +373,7 @@ class FileServer(rpyc.Service):
             db_files (list):    A list of the files according to the database.
         """
         
-        # DEBUG
-        print("Running garbage collection...")
+        print(f"[{utils.current_timestamp()}] Running garbage collection...")
         
         # Transform the list of tuples to a list of strings.
         db_files = [file[0] for file in db_files]
@@ -437,8 +431,9 @@ class FileServer(rpyc.Service):
             to the database.
         """
         
-        # DEBUG
-        print("Running consistency check...")
+        # TEST: cancellazione file nella directory di primary e non primary fs.
+        
+        print(f"[{utils.current_timestamp()}] Running consistency check...")
         
         # For each file, get its checksum.
         for file in files:
@@ -446,17 +441,24 @@ class FileServer(rpyc.Service):
             # absolute path in the local storage.
             local_path = os.path.join(self.files_dir, file[0])
             
-            # Calculate the checksum of the file.
-            checksum = utils.calculate_checksum(local_path)
+            # If the file exists, calculate its checksum.
+            if os.path.exists(local_path):
+                checksum = utils.calculate_checksum(local_path)
+                
+                # If the file is corrupted, demand database update to the name server.
+                if file[1] != checksum:
+                    # DEBUG
+                    print(f"File {file[0]} is corrupted.")
+                    
+                    result = self.conn.root.handle_file_inconsistency(self.token, file[0])
+                    print(result)
             
-            # Try to match the checksums.
-            if file[1] != checksum:
+            # If the file does not exist, demand database update to the name server.
+            else:
                 # DEBUG
-                print(f"File {file[0]} is corrupted.")
+                print(f"File {file[0]} does not exist.")
                 
-                # Demand database update to the name server.
                 result = self.conn.root.handle_file_inconsistency(self.token, file[0])
-                
                 print(result)
 
 

@@ -14,23 +14,20 @@ import utils
 
 
 
-# IMPROVE: la porta del server ed i percorsi di database e lockfile dovrebbero
-#       essere spostati su variabili d'ambiente o files di configurazione.
+# IMPROVE: spostare in variabili d'ambiente/file di configurazione.
 
 LOCKFILE_PATH   = "./NS/nameserver.lock"
 DB_PATH         = "./NS/NS.db"
 SERVER_HOST     = "localhost"
 SERVER_PORT     = 18861
 
-# IMPROVE: i parametri di sicurezza vengono impostati come variabili globali per
-#       semplicità. Anche per questi ci si dovrebbe servire di un altro tipo
-#       di meccanismo.
-
 # NOTE: per le interazioni potenzialmente critiche tra client e server, ci si
 #       serve di un sistema di verifica tramite token JWT. Il token è generato
 #       per entrambi clients e file servers. La chiave segreta è RSA a 2048 bit.
 #       La chiave pubblica è distribuita solo ai file servers, ed utilizzata da
 #       name server e file servers per autenticare i token.
+
+# IMPROVE: spostare in variabili d'ambiente/file di configurazione.
 
 # Generate private and public keys.
 PRIVATE_KEY     = rsa.generate_private_key(
@@ -1523,16 +1520,16 @@ class NameServerService(rpyc.Service):
                     (new_primary_server, file_path)
                     )
                 conn.commit()
+                
+                return f"Primary server for file '{file_path}' updated successfully."
             
             except sqlite3.OperationalError as e:
                 print(f"Error updating primary server:", e)
-                conn.close()
                 
                 return f"Error updating the primary server for file '{file_path}'"
-        
-            conn.close()
             
-            return f"Primary server for file '{file_path}' updated successfully."
+            finally:
+                conn.close()
         
         # If no online file server was found, try to find one offline.
         try:
@@ -1573,12 +1570,16 @@ class NameServerService(rpyc.Service):
                     (new_primary_server, file_path)
                     )
                 conn.commit()
+                
+                return f"Primary server for file '{file_path}' updated successfully."
             
             except sqlite3.OperationalError as e:    
                 print(f"Error updating primary server:", e)
-                conn.close()
                 
                 return f"Error updating the primary server for file '{file_path}'"
+            
+            finally:
+                conn.close()
         
         # Eventually, if no new primary file server was found, mark the file as
         # corrupted.
@@ -1595,6 +1596,8 @@ class NameServerService(rpyc.Service):
                 (file_path, )
                 )
             conn.commit()
+            
+            return f"File '{file_path}' marked as corrupted successfully."
         
         except sqlite3.OperationalError as e:
             print(f"Error marking file as corrupted:", e)
@@ -1602,9 +1605,8 @@ class NameServerService(rpyc.Service):
             
             return f"Error marking file '{file_path}' as corrupted"
         
-        conn.close()
-        
-        return f"File '{file_path}' marked as corrupted successfully."
+        finally:
+            conn.close()
 
 
 ##### PERIODIC JOBS #####
@@ -1946,9 +1948,7 @@ def periodic_trigger_consistency_check():
 
 if __name__ == "__main__":
     
-    # IMPROVE: anche numero di repliche e altri parametri di configurazione
-    #          dovrebbero essere spostati su variabili d'ambiente o files di
-    #          configurazione.
+    # IMPROVE: spostare in variabili d'ambiente/file di configurazione.
     
     print("Welcome to sym-DFS Project Server.")
     
