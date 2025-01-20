@@ -145,8 +145,6 @@ class RegularClient(BaseClient):
     def logout(self):
         """Logs out the current user."""
         
-        # TEST: logout di un client attivo e successivo login con un altro.
-        
         if self.user_is_logged:
             self._cleanup()
         else:
@@ -155,6 +153,7 @@ class RegularClient(BaseClient):
 
 
 if __name__ == "__main__":
+    
     # Create the client.
     client = RegularClient(sys.argv[1], int(sys.argv[2]))
     

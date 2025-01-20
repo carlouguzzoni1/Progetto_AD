@@ -73,6 +73,7 @@ class NameServerService(rpyc.Service):
     #       possono eseguire più thread in simultanea senza restrizioni.
     #       https://docs.python.org/3/library/sqlite3.html#sqlite3.threadsafety
     #       Il progetto si può estendere per supportare accesso concorrente al DB.
+    
     # IMPROVE: per risparmiare codice si potrebbe trovare il modo di definire una
     #       funzione od un decoratore che nasconda i costrutti try-catch, esponendo
     #       solamente SQL queries e messaggi di errore.
@@ -248,36 +249,8 @@ class NameServerService(rpyc.Service):
         return token
     
     
-    def _get_token_payload(self, token):
-        """
-        Gets the payload of a JWT token.
-        Args:
-            token (str):  The JWT token.
-        Returns:
-            dict:         The payload of the token.
-        """
-        
-        # IMPROVE: questa funzione si dovrebbe spostare nel pacchetto delle
-        #          funzioni di utilità, aggiungendo il parametro per la chiave
-        #          pubblica. Entrambi name server e file servers risparmierebbero
-        #          la scrittura del codice.
-        
-        try:
-            payload = jwt.decode(token, self._public_key, algorithms=["RS384"])
-        
-        except jwt.InvalidTokenError as e:
-            print("Error decoding JWT token:", e)
-            
-            return None
-        
-        return payload
-    
-    
     ##### ENTITY MANAGEMENT RPCs #####
     
-    
-    # NOTE: la creazione di utenti e file servers vanno bene anche separate,
-    #       in quanto signature e logica sono sufficientemente differenti.
     
     def exposed_create_user(self, username, password, is_root=False, root_passphrase=None):
         """
@@ -374,10 +347,6 @@ class NameServerService(rpyc.Service):
             conn.close()
     
     
-    # NOTE: autenticazione di clients e file servers si potrebbero accorpare,
-    #       perché la logica è piuttosto simile. Trattandosi però di due RPC
-    #       abbastanza verbose, per ora le teniamo separate.
-    
     def exposed_authenticate_user(self, username, password):
         """
         Authenticates a user and sends back a JWT token.
@@ -394,6 +363,7 @@ class NameServerService(rpyc.Service):
         #       assicurare un minimo di sicurezza. In questo caso supponiamo
         #       semplicemente che chi tenta di autenticarsi come root debba conoscere
         #       le credenziali.
+        
         # IMPROVE: per rendere il progetto più sicuro si potrebbe implementare un
         #       numero massimo di tentativi di accesso.
         
@@ -687,26 +657,20 @@ class NameServerService(rpyc.Service):
             conn.close()
     
     
-    def exposed_logout(self, token):
+    def exposed_logout_user(self, token):
         """
         Logs out an entity.
         Args:
-            token (str):    The JWT token of the requestor.
+            token (str):    The JWT token of the client.
         Returns:
             str:            A message indicating the result of the operation.
         """
         
-        # NOTE: il logout è una RPC unica per clients e file servers, per
-        #       rendere il codice piu' semplice. Ciò che cambia di fatto è
-        #       solamente la tabella da aggiornare.
+        conn        = sqlite3.connect(self.db_path)
+        cursor      = conn.cursor()
         
-        # TODO: separare i metodi per clients e file servers.
-        
-        conn            = sqlite3.connect(self.db_path)
-        cursor          = conn.cursor()
-        
-        # Get the username and the role from the token.
-        payload         = self._get_token_payload(token)
+        # Get the username from the token.
+        payload     = utils.get_token_payload(token, self._public_key)
         
         if payload is None:
             conn.close()
@@ -714,33 +678,8 @@ class NameServerService(rpyc.Service):
             return f"Error logging out. Corrupted token."
         
         username    = payload["username"]
-        role        = payload["role"]
         
-        # If the requestor is a file server, update its online status.
-        if role == "file_server":
-            try:
-                cursor.execute("""
-                    UPDATE file_servers
-                    SET is_online = 0
-                    WHERE name = ?
-                    """,
-                    (username,)
-                    )
-                conn.commit()
-                
-                return f"File server '{username}' logged out successfully."
-            
-            except sqlite3.OperationalError as e:
-                print("Error updating record for file server:", e)
-                conn.close()
-                
-                return f"Error logging out file server '{username}'."
-            
-            finally:
-                conn.close()
-        
-        
-        # Else, it must be a client, so update its online status.
+        # Update the client online status.
         try:
             cursor.execute("""
                 UPDATE users
@@ -763,6 +702,51 @@ class NameServerService(rpyc.Service):
             conn.close()
     
     
+    
+    def exposed_logout_file_server(self, token):
+        """
+        Logs out a file server.
+        Args:
+            token (str):    The JWT token of the file server.
+        Returns:
+            str:            A message indicating the result of the operation.
+        """
+        
+        conn        = sqlite3.connect(self.db_path)
+        cursor      = conn.cursor()
+        
+        # Get the username and the role from the token.
+        payload     = utils.get_token_payload(token, self._public_key)
+        
+        if payload is None:
+            conn.close()
+            
+            return f"Error logging out. Corrupted token."
+        
+        username    = payload["username"]
+        
+        try:
+            cursor.execute("""
+                UPDATE file_servers
+                SET is_online = 0
+                WHERE name = ?
+                """,
+                (username,)
+                )
+            conn.commit()
+            
+            return f"File server '{username}' logged out successfully."
+        
+        except sqlite3.OperationalError as e:
+            print("Error updating record for file server:", e)
+            conn.close()
+            
+            return f"Error logging out file server '{username}'."
+        
+        finally:
+            conn.close()
+    
+    
     ##### BASIC CLIENT RPCs #####
     
     
@@ -779,7 +763,7 @@ class NameServerService(rpyc.Service):
         cursor  = conn.cursor()
         
         # Get the username from the token.
-        payload = self._get_token_payload(token)
+        payload = utils.get_token_payload(token, self._public_key)
         
         if payload is None:
             conn.close()
@@ -841,7 +825,7 @@ class NameServerService(rpyc.Service):
         """
         
         # Get the username from the token.
-        payload = self._get_token_payload(token)
+        payload = utils.get_token_payload(token, self._public_key)
         
         if payload is None:
             return {
@@ -1003,7 +987,7 @@ class NameServerService(rpyc.Service):
         # TEST: download file da server primario e non.
         
         # Get the username from the token.
-        payload = self._get_token_payload(token)
+        payload = utils.get_token_payload(token, self._public_key)
         
         if payload is None:
             return {
@@ -1110,7 +1094,7 @@ class NameServerService(rpyc.Service):
         #       garbage cleaning attivi.
         
         # Get the username from the token.
-        payload = self._get_token_payload(token)
+        payload = utils.get_token_payload(token, self._public_key)
         
         if payload is None:
             return f"Error deleting file. Corrupted token."
@@ -1207,7 +1191,7 @@ class NameServerService(rpyc.Service):
         # TEST: lista di tutti i files con un file corrotto nel database.
         
         # Get the client's role from the token.
-        payload = self._get_token_payload(token)
+        payload = utils.get_token_payload(token, self._public_key)
         
         if payload is None:
             return {
@@ -1263,13 +1247,8 @@ class NameServerService(rpyc.Service):
             dict:           A dictionary with the status and the list of clients.
         """
         
-        # NOTE: la lista di tutti i files, di tutti i clients e di tutti i file
-        #       servers è effettivamente un po' boilerplate. Si potrebbe definire
-        #       una funzione che faccia tutte e 3 le cose, ma si tratterebbe
-        #       di una soluzione meno modulare di quella attuale.
-        
         # Get the client's role from the token.
-        payload = self._get_token_payload(token)
+        payload = utils.get_token_payload(token, self._public_key)
         
         if payload is None:
             return {
@@ -1325,7 +1304,7 @@ class NameServerService(rpyc.Service):
         """
         
         # Get the client's role from the token.
-        payload = self._get_token_payload(token)
+        payload = utils.get_token_payload(token, self._public_key)
         
         if payload is None:
             return {
@@ -1382,7 +1361,7 @@ class NameServerService(rpyc.Service):
         """
         
         # Get the requestor's username and role from the token.
-        payload = self._get_token_payload(token)
+        payload = utils.get_token_payload(token, self._public_key)
         
         if payload is None:
             return f"Error updating heartbeat. Corrupted token."
@@ -1412,21 +1391,24 @@ class NameServerService(rpyc.Service):
                 conn.close()
         
         # Else the requestor is a client, so update its last heartbeat.
-        try:
-            cursor.execute("""
-                UPDATE users
-                SET last_heartbeat = datetime('now')
-                WHERE username = ?  
-                """,
-                (username,)
-                )
-            conn.commit()
+        else:
+            try:
+                cursor.execute("""
+                    UPDATE users
+                    SET last_heartbeat = datetime('now')
+                    WHERE username = ?  
+                    """,
+                    (username,)
+                    )
+                conn.commit()
+            
+            except sqlite3.OperationalError as e:
+                print(f"Error updating record for client:", e)
+            
+            finally:
+                conn.close()
         
-        except sqlite3.OperationalError as e:
-            print(f"Error updating record for client:", e)
-        
-        finally:
-            conn.close()
+        return
     
     
     def exposed_handle_file_inconsistency(self, token, file_path):
@@ -1438,7 +1420,7 @@ class NameServerService(rpyc.Service):
         """
         
         # Get the requestor's username and role from the token.
-        payload = self._get_token_payload(token)
+        payload = utils.get_token_payload(token, self._public_key)
         
         if payload is None:
             return f"Error handling file inconsistency. Corrupted token."
@@ -2011,7 +1993,11 @@ if __name__ == "__main__":
     scheduler.start()
     
     # Start the name server.
-    server = ThreadedServer(NameServerService, port=SERVER_PORT)
+    server = ThreadedServer(
+        NameServerService,
+        hostname=SERVER_HOST,
+        port=SERVER_PORT
+        )
     
     print("Starting name server...")
     server.start()

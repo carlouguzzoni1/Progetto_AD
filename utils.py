@@ -1,7 +1,28 @@
 import datetime
 import hashlib
 import sys
+import jwt
 
+
+
+def get_token_payload(token, public_key):
+    """
+    Gets the payload of a JWT token.
+    Args:
+        token (str):  The JWT token.
+    Returns:
+        dict:         The payload of the token.
+    """
+    
+    try:
+        payload = jwt.decode(token, public_key, algorithms=["RS384"])
+    
+    except jwt.InvalidTokenError as e:
+        print("Error decoding JWT token:", e)
+        
+        return None
+    
+    return payload
 
 
 def calculate_checksum(file_path):
@@ -49,6 +70,31 @@ def handle_keyboard_interrupt_client(signum, frame, client):
     client._cleanup()   # Logout + state reset + scheduler shutdown.
     
     sys.exit(0)         # Calls __del__ -> disconnection.
+
+
+def handle_keyboard_interrupt_file_server(signum, frame, file_server):
+    """
+    Handles a KeyboardInterrupt exception.
+    Args:
+        signum (int):           The signal number.
+        frame (object):         The stack frame.
+        file_server (object):   The file server object.
+    """
+    
+    print("\nExiting due to keyboard interrupt...")
+    
+    file_server._cleanup()  # Logout + scheduler shutdown.
+    
+    # Stop the ThreadedServer.
+    try:
+        if hasattr(file_server, '_server'):
+            print("Stopping the threaded server...")
+            file_server._server.close()
+    
+    except Exception as e:
+        print(f"Error stopping the threaded server: {e}")
+    
+    sys.exit(0)             # Calls __del__ -> disconnection.
 
 
 def current_timestamp():
