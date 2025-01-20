@@ -53,7 +53,7 @@ class BaseClient(ABC):
         print("Logging out...")
         
         try:
-            result = self.conn.root.logout(self.token)
+            result = self.conn.root.logout_user(self.token)
             print(result)
         
         except Exception as e:

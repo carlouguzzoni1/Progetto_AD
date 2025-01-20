@@ -1,6 +1,9 @@
+from functools import partial
 import os
+import signal
 import sys
 import rpyc
+from rpyc.utils.server import ThreadedServer
 from getpass import getpass
 import jwt
 import heartbeats
@@ -22,15 +25,15 @@ class FileServer(rpyc.Service):
     #       un task relativamente semplice. Esempio:
     #           1. aggiungere il campo is_deleted a tutti i files
     #           2. assegnare ad un altro primary file server (tra quelli
-    #              che ospitano una replica) tutti i files che erano
-    #              assegnati al file server da cancellare
+    #              che ospitano una replica) tutti i files che avevano
+    #              come primary file server quello da cancellare
     #           3. marcare tutti i files a cui non si è trovata una nuova
     #              sistemazione come "deleted"
     #           4. cancellare le entry relative al file server e le repliche
     #              in suo possesso
     #           5. facoltativo: cancellare le directory di storage locali
     
-    # TODO: nel garbage cleaning, si potrebbe controllare la presenza di
+    # TODO: nel consistency check, si potrebbe controllare la presenza di
     #       eventuali files che secondo il name server dovrebbero trovarsi
     #       nello storage locale, ma che non sono stati trovati. Questi
     #       dovrebbero poi essere marcati come corrotti. Fare anche testing.
@@ -56,6 +59,7 @@ class FileServer(rpyc.Service):
         self.name           = None      # The name of the file server.
         self.token          = None      # The JWT token of the file server.
         self._public_key    = None      # Public key for JWT tokens.
+        self._server        = None      # The ThreadedServer instance for the file server.
     
     
     def __del__(self):
@@ -64,30 +68,38 @@ class FileServer(rpyc.Service):
         (to False) and close connection upon deletion.
         """
         
-        # TODO: implementare un meccanismo di spegnimento del file server basato
-        #       su segnali.
-        
         print("Shutting down file server...")
         
-        # Stop the scheduler.
-        print("Shutting down the job scheduler...")
-        if self.scheduler:
-            self.scheduler.remove_all_jobs()
-            self.scheduler.shutdown()
-            self.scheduler = None
+        # Close the connection.
+        print("Closing the connection to the name server...")
+        self.conn.close()
+    
+    
+    ##### PRIVATE METHODS #####
+    
+    
+    def _cleanup(self):
+        """Cleans up the file server's state upon logout or keyboard interrupt."""
+        
+        # NOTE: ampliare il cleanup con i reset di stato nel caso in cui si
+        #       voglia implementare un sistema di login/logout per i file servers.
         
         # Update the file server's status in the name server's database.
         print("Logging out...")
         
         try:
-            self.conn.root.logout(self.token)
+            result = self.conn.root.logout_file_server(self.token)
+            print(result)
         
         except Exception as e:
             print(f"Error logging out: {e}")
         
-        # Close the connection.
-        print("Closing the connection to the name server...")
-        self.conn.close()
+        # Stop the scheduler.
+        print("Shutting down the job scheduler...")
+        
+        if self.scheduler:
+            self.scheduler.remove_all_jobs()
+            self.scheduler.shutdown()
     
     
     def _get_token_payload(self, token):
@@ -123,6 +135,9 @@ class FileServer(rpyc.Service):
             exit(1)
     
     
+    ##### USER INTERACTION METHODS #####
+    
+    
     def display_commands(self):
         """Displays the available commands for the file server."""
         
@@ -133,6 +148,32 @@ class FileServer(rpyc.Service):
             login           Log in as an existing file server
             exit            Exit
         """)
+    
+    
+    def main_prompt(self):
+        """Main prompt for the file server."""
+        
+        self.connect()              # Connect to the name server.
+        self.display_commands()     # Display the available commands.
+        
+        while True:
+            # Get user input.
+            command = input("({})> ".format(self.name) if self.name else "(fs prompt)> ")
+            
+            # Execute the command.
+            match command:
+                case "register":
+                    self.register()
+                case "login":
+                    if self.login():
+                        break                    
+                case "exit":
+                    print("Exiting...")
+                    # Close the connection.
+                    self.conn.close()
+                    exit(0)
+                case _:
+                    print("Unknown command.")
     
     
     def register(self):
@@ -194,30 +235,7 @@ class FileServer(rpyc.Service):
         return result["status"]
     
     
-    def main_prompt(self):
-        """Main prompt for the file server."""
-        
-        self.connect()              # Connect to the name server.
-        self.display_commands()     # Display the available commands.
-        
-        while True:
-            # Get user input.
-            command = input("({})> ".format(self.name) if self.name else "(fs prompt)> ")
-            
-            # Execute the command.
-            match command:
-                case "register":
-                    self.register()
-                case "login":
-                    if self.login():
-                        break                    
-                case "exit":
-                    print("Exiting...")
-                    # Close the connection.
-                    self.conn.close()
-                    exit(0)
-                case _:
-                    print("Unknown command.")
+    ##### CLIENTS RPCs #####
     
     
     def exposed_store_file(self, file_path, file_data, token):
@@ -317,6 +335,9 @@ class FileServer(rpyc.Service):
                 "file_data": file_data,
                 "message": "File received successfully."
                 }
+    
+    
+    ##### NAME SERVER RPCs #####
     
     
     def exposed_send_file_replicas(self, file_path, file_servers):
@@ -436,20 +457,33 @@ class FileServer(rpyc.Service):
                 # Demand database update to the name server.
                 result = self.conn.root.handle_file_inconsistency(self.token, file[0])
                 
-                # ...
-                
                 print(result)
 
 
 
 if __name__ == "__main__":
-    from rpyc.utils.server import ThreadedServer
     
-    file_server = FileServer(sys.argv[1], int(sys.argv[2])) # Create the file server.
+    # Create the file server.
+    file_server = FileServer(sys.argv[1], int(sys.argv[2]))
+    
+    # Handle keyboard interrupts.
+    signal.signal(
+        signal.SIGINT,
+        partial(utils.handle_keyboard_interrupt_file_server, file_server=file_server)
+        )
+    
     # Prompt is displayed until a login is successful.
     file_server.main_prompt()
     
-    server = ThreadedServer(file_server, port=file_server.port)
+    # Start the file server.
+    server = ThreadedServer(
+        file_server,
+        hostname=file_server.host,
+        port=file_server.port
+        )
+    
+    # Associate the ThreadedServer to the file server.
+    file_server._server = server
     
     print("Starting file server...")
     server.start()
