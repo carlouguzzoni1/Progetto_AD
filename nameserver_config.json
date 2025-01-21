@@ -1,0 +1,19 @@
+{
+    "directories": {
+        "lockfile_path":        "./NS/nameserver.lock",
+        "db_path":              "./NS/NS.db"
+    },
+    "coordinates": {
+        "server_host":          "localhost",
+        "server_port":          18861
+    },
+    "root_passphrase":          "sym-DFS-project",
+    "num_replicas":             3,
+    "kll_policy":               3,
+    "timeouts": {
+        "heartbeat":            30,
+        "replication":          30,
+        "garbage_collection":   30,
+        "consistency_check":    30
+    }
+}

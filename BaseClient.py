@@ -8,7 +8,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 
 
-# IMPROVE: spostare in variabili d'ambiente/file di configurazione.
+# TODO: spostare in variabili d'ambiente/file di configurazione.
 CLIENT_ROOT_DIR = "./CLI"
 
 

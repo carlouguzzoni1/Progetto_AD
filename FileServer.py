@@ -5,7 +5,6 @@ import sys
 import rpyc
 from rpyc.utils.server import ThreadedServer
 from getpass import getpass
-import jwt
 import heartbeats
 from apscheduler.schedulers.background import BackgroundScheduler
 import utils

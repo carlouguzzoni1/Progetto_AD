@@ -5,6 +5,12 @@ import jwt
 
 
 
+# NOTE: tutte le utils sono raccolte in questo files, perché alcune di esse
+#       vengono usate da più entità nell'architettura. Il loro numero ed il
+#       volume di codice non rendono il progetto meno chiaro.
+
+
+
 def generate_token(user_id, role, private_key):
     """
     Generates a JWT token for clients and file servers.

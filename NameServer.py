@@ -1,4 +1,3 @@
-import datetime
 import rpyc.lib
 from rpyc.utils.server import ThreadedServer
 import os
@@ -6,28 +5,50 @@ import random
 import sqlite3
 import rpyc
 from bcrypt import hashpw, gensalt, checkpw
-import jwt
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
 from apscheduler.schedulers.background import BackgroundScheduler
 import utils
+import json
 
 
 
-# IMPROVE: spostare in variabili d'ambiente/file di configurazione.
+# Load configuration from file.
+with open('nameserver_config.json', 'r') as file:
+    config = json.load(file)
 
-LOCKFILE_PATH   = "./NS/nameserver.lock"
-DB_PATH         = "./NS/NS.db"
-SERVER_HOST     = "localhost"
-SERVER_PORT     = 18861
+LOCKFILE_PATH   = config['directories']['lockfile_path']
+DB_PATH         = config['directories']['db_path']
+SERVER_HOST     = config['coordinates']['server_host']
+SERVER_PORT     = config['coordinates']['server_port']
+ROOT_PASSPHRASE = config['root_passphrase']
+
+# NOTE: la passphrase è il meccanismo che consente ai root users di potersi
+#       registrare come tali. La verifica della passphrase avviene lato-file
+#       server e ha lo scopo di non permettere in nessun caso ad altri clients
+#       di accedere alla registrazione di root users.
+
+K_REPLICAS      = config['num_replicas']                    # Mantain K replicas.
+K_LEAST_LOADED  = config['kll_policy']                      # K-least loaded policy.
+HB_TIMEOUT      = config['timeouts']['heartbeat']           # Receive heart-beats every HB_TIMEOUT seconds.
+PR_TIMEOUT      = config['timeouts']['replication']         # Start periodic replication every PR_TIMEOUT seconds.
+GC_TIMEOUT      = config['timeouts']['garbage_collection']  # Start garbage collection every GC_TIMEOUT seconds.
+CC_TIMEOUT      = config['timeouts']['consistency_check']   # Start consistency check every CC_TIMEOUT seconds.
+
+
+
+##### RSA KEYS GENERATION #####
+
+
 
 # NOTE: per le interazioni potenzialmente critiche tra client e server, ci si
 #       serve di un sistema di verifica tramite token JWT. Il token è generato
 #       per entrambi clients e file servers. La chiave segreta è RSA a 2048 bit.
 #       La chiave pubblica è distribuita solo ai file servers, ed utilizzata da
 #       name server e file servers per autenticare i token.
+#       Entrambe le chiavi sono generate all'avvio del name server.
 
-# IMPROVE: spostare in variabili d'ambiente/file di configurazione.
+# IMPROVE: si potrebbe implementare un sistema di rotazione delle chiavi.
 
 # Generate private and public keys.
 PRIVATE_KEY     = rsa.generate_private_key(
@@ -48,17 +69,11 @@ PUBLIC_KEY      = PUBLIC_KEY.public_bytes(
     format                  = serialization.PublicFormat.SubjectPublicKeyInfo
     ).decode("utf-8")
 
-# NOTE: la passphrase è il meccanismo che consente ai root users di potersi
-#       registrare come tali. La verifica della passphrase avviene lato-file
-#       server e ha lo scopo di non permettere in nessun caso ad altri clients
-#       di accedere alla registrazione di root users.
-
-# Root passphrase for creating root users.
-ROOT_PASSPHRASE = "sym-DFS-project"
 
 
+##### NAME SERVER CLASS #####
 
-### Name server main class ###
+
 
 class NameServerService(rpyc.Service):
     """
@@ -115,6 +130,7 @@ class NameServerService(rpyc.Service):
         self.server_host        = host              # Host for the name server.
         self.server_port        = port              # Port for the name server.
         self.db_path            = DB_PATH           # Local path to the database.
+        self.kll_policy         = K_LEAST_LOADED    # K-least loaded policy.
         self._private_key       = PRIVATE_KEY       # Private key for JWT tokens.
         self._public_key        = PUBLIC_KEY        # Public key for JWT tokens.
         self._root_passphrase   = ROOT_PASSPHRASE   # Root passphrase for creating root users.
@@ -123,7 +139,7 @@ class NameServerService(rpyc.Service):
         self.token              = utils.generate_token(
             "ns",
             "name_server",
-            PRIVATE_KEY
+            self._private_key
             )
         
         self._setup_database()
@@ -148,7 +164,7 @@ class NameServerService(rpyc.Service):
         Creates the nameserver's database (if it doesn't exist) and initializes it.
         """
         
-        if os.path.exists(DB_PATH):
+        if os.path.exists(self.db_path):
             print("Database already exists.")
             
             return
@@ -251,7 +267,7 @@ class NameServerService(rpyc.Service):
         hashed_password = hashpw(password.encode('utf-8'), gensalt())
         
         # Check if someone unauthorized is trying to create a root user.
-        if is_root and root_passphrase != ROOT_PASSPHRASE:
+        if is_root and root_passphrase != self._root_passphrase:
             return {
                 "status":   False,
                 "message":  "Invalid root passphrase. Unauthorized action."
@@ -833,9 +849,6 @@ class NameServerService(rpyc.Service):
         # Get the file's name.
         file_name = os.path.basename(file_path)
         
-        # K is the number of file servers to randomly choose from.
-        K = 3
-        
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
@@ -848,7 +861,7 @@ class NameServerService(rpyc.Service):
                 ORDER BY free_space DESC
                 LIMIT ?
                 """,
-                (K,)
+                (self.kll_policy,)
                 )
             result = cursor.fetchall()
         
@@ -1872,7 +1885,7 @@ class NameServerService(rpyc.Service):
         
         print(f"[{utils.current_timestamp()}] Triggering consistency check on active file servers...")
         
-        conn    = sqlite3.connect(DB_PATH)
+        conn    = sqlite3.connect(self.db_path)
         cursor  = conn.cursor()
         
         # Select all the file servers that are online.
@@ -1934,14 +1947,6 @@ if __name__ == "__main__":
     
     print("Welcome to sym-DFS Project Server.")
     
-    # IMPROVE: spostare in variabili d'ambiente/file di configurazione.
-    
-    K           = 2     # Mantain K replicas.
-    HB_TIMEOUT  = 30    # Receive heart-beats every HB_TIMEOUT seconds.
-    PR_TIMEOUT  = 30    # Start periodic replication every PR_TIMEOUT seconds.
-    GC_TIMEOUT  = 30    # Start garbage collection every GC_TIMEOUT seconds.
-    CC_TIMEOUT  = 30    # Start consistency check every CC_TIMEOUT seconds.
-    
     ### Name server creation.
     name_server = NameServerService()
     
@@ -1955,31 +1960,31 @@ if __name__ == "__main__":
     print("Starting periodic replication job...")
     scheduler.add_job(
         name_server.periodic_replication_job,
-        args=[K],
-        trigger='interval',
-        seconds=PR_TIMEOUT
+        args    = [K_REPLICAS],
+        trigger = 'interval',
+        seconds = PR_TIMEOUT
         )
     
     print("Starting periodic check activity job...")
     scheduler.add_job(
         name_server.periodic_check_activity,
-        args=[HB_TIMEOUT],
-        trigger='interval',
-        seconds=HB_TIMEOUT
+        args    = [HB_TIMEOUT],
+        trigger = 'interval',
+        seconds = HB_TIMEOUT
         )
     
     print("Starting periodic garbage collection job...")
     scheduler.add_job(
         name_server.periodic_trigger_garbage_collection,
-        trigger='interval',
-        seconds=GC_TIMEOUT
+        trigger = 'interval',
+        seconds = GC_TIMEOUT
     )
     
     print("Starting periodic consistency check job...")
     scheduler.add_job(
         name_server.periodic_trigger_consistency_check,
-        trigger='interval',
-        seconds=CC_TIMEOUT
+        trigger = 'interval',
+        seconds = CC_TIMEOUT
     )
     
     scheduler.start()
@@ -1987,8 +1992,8 @@ if __name__ == "__main__":
     ### Name server start.
     server = ThreadedServer(
         name_server,
-        hostname=SERVER_HOST,
-        port=SERVER_PORT
+        hostname    = name_server.server_host,
+        port        = name_server.server_port
         )
     
     print("Starting name server...")
