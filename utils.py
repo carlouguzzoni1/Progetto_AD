@@ -5,6 +5,26 @@ import jwt
 
 
 
+def generate_token(user_id, role, private_key):
+    """
+    Generates a JWT token for clients and file servers.
+    Args:
+        user_id (str):      The username or the server name.
+        role (str):         The role of the entity.
+        private_key (str):  The private key for signing.
+    Returns:
+        str:                The generated JWT token.
+    """
+    
+    payload = {
+        "username": user_id,
+        "role":     role
+    }
+    token = jwt.encode(payload, private_key, algorithm="RS384")
+    
+    return token
+
+
 def get_token_payload(token, public_key):
     """
     Gets the payload of a JWT token.
