@@ -10,7 +10,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 import heartbeats
 
 
-# IMPROVE: spostare in file di configurazione/variabile d'ambiente.
+# TODO: spostare in file di configurazione/variabile d'ambiente.
 LOCKFILE_PATH = "./NS/rootclient.lock"
 
 

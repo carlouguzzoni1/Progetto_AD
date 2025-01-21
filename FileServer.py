@@ -5,7 +5,6 @@ import sys
 import rpyc
 from rpyc.utils.server import ThreadedServer
 from getpass import getpass
-import jwt
 import heartbeats
 from apscheduler.schedulers.background import BackgroundScheduler
 import utils
@@ -33,15 +32,6 @@ class FileServer(rpyc.Service):
     #              in suo possesso
     #           5. facoltativo: cancellare le directory di storage locali
     
-    # TODO: nel consistency check, si potrebbe controllare la presenza di
-    #       eventuali files che secondo il name server dovrebbero trovarsi
-    #       nello storage locale, ma che non sono stati trovati. Questi
-    #       dovrebbero poi essere marcati come corrotti. Fare anche testing.
-    
-    # TODO: si dovrebbe implementare un meccanismo per rendere le RPC definite
-    #       appositamente per l'interazione name server/file server inutilizzabili
-    #       al client.
-    
     def __init__(self, ns_host, ns_port):
         """
         Initializes the file server.
@@ -58,6 +48,7 @@ class FileServer(rpyc.Service):
         self.files_dir      = None      # The storage directory of the file server.
         self.name           = None      # The name of the file server.
         self.token          = None      # The JWT token of the file server.
+        self.scheduler      = None      # The job scheduler.
         self._public_key    = None      # Public key for JWT tokens.
         self._server        = None      # The ThreadedServer instance for the file server.
     
@@ -102,26 +93,6 @@ class FileServer(rpyc.Service):
             self.scheduler.shutdown()
     
     
-    def _get_token_payload(self, token):
-        """
-        Gets the payload of a JWT token.
-        Args:
-            token (str):  The JWT token.
-        Returns:
-            dict:         The payload of the token.
-        """
-        
-        try:
-            payload = jwt.decode(token, self._public_key, algorithms=["RS384"])
-        
-        except jwt.InvalidTokenError as e:
-            print("Error decoding JWT token:", e)
-            
-            return None
-        
-        return payload
-    
-    
     def connect(self):
         """Establishes a connection to the name server."""
         
@@ -129,7 +100,7 @@ class FileServer(rpyc.Service):
             print("Connecting to the name server...")
             self.conn = rpyc.connect(self.ns_host, self.ns_port)
             print("Connection established.")
-
+        
         except Exception as e:
             print(f"Error connecting to the server: {e}")
             exit(1)
@@ -174,6 +145,9 @@ class FileServer(rpyc.Service):
                     exit(0)
                 case _:
                     print("Unknown command.")
+    
+    
+    # REVISIONE CODICE OK FINO QUA <-----
     
     
     def register(self):
@@ -253,7 +227,7 @@ class FileServer(rpyc.Service):
         print(f"Storing file '{file_path}'...")
         
         # Verify the token.
-        payload = self._get_token_payload(token)
+        payload = utils.get_token_payload(self.token, self._public_key)
         
         if payload is None:
             return {"status": False, "message": "Error storing file. Corrupted token."}
@@ -304,7 +278,7 @@ class FileServer(rpyc.Service):
         print(f"Sending file '{file_path}'...")
         
         # Get the username from the token.
-        payload = self._get_token_payload(token)
+        payload = utils.get_token_payload(self.token, self._public_key)
         
         if payload is None:
             return {"status": False, "message": "Error sending file. Corrupted token."}
@@ -340,7 +314,7 @@ class FileServer(rpyc.Service):
     ##### NAME SERVER RPCs #####
     
     
-    def exposed_send_file_replicas(self, file_path, file_servers):
+    def exposed_send_file_replicas(self, token, file_path, file_servers):
         """
         Sends a file to a list of file servers.
         Args:
@@ -350,6 +324,20 @@ class FileServer(rpyc.Service):
         
         # DEBUG
         print(f"Received request to send replicas for file '{file_path}'.")
+        
+        # Check whether the token is valid.
+        payload = utils.get_token_payload(token, self._public_key)
+        
+        if payload is None:
+            print("Error sending file replicas. Corrupted token.")
+            
+            return
+        
+        # Ensure that the requestor is the name server.
+        if payload["role"] != "name_server":
+            print("Error sending file replicas. Requestor is not a name server.")
+            
+            return
         
         # Iterate through the file servers and send the file.
         for server in file_servers:
@@ -370,7 +358,7 @@ class FileServer(rpyc.Service):
                 print(result["message"])
     
     
-    def exposed_garbage_collection(self, db_files):
+    def exposed_garbage_collection(self, token, db_files):
         """
         Deletes all the files in the file server that are not in the list, in
         order to synchronize the file server with the database.
@@ -378,8 +366,21 @@ class FileServer(rpyc.Service):
             db_files (list):    A list of the files according to the database.
         """
         
-        # DEBUG
-        print("Running garbage collection...")
+        print(f"[{utils.current_timestamp()}] Running garbage collection...")
+        
+        # Check whether the token is valid.
+        payload = utils.get_token_payload(token, self._public_key)
+        
+        if payload is None:
+            print("Error starting garbage collection. Corrupted token.")
+            
+            return
+        
+        # Ensure that the requestor is the name server.
+        if payload["role"] != "name_server":
+            print("Error starting garbage collection. Requestor is not a name server.")
+            
+            return
         
         # Transform the list of tuples to a list of strings.
         db_files = [file[0] for file in db_files]
@@ -429,7 +430,7 @@ class FileServer(rpyc.Service):
                         print("Error deleting empty directory")
     
     
-    def exposed_consistency_check(self, files):
+    def exposed_consistency_check(self, token, files):
         """
         Checks the consistency of the files stored in the file server.
         Args:
@@ -437,8 +438,23 @@ class FileServer(rpyc.Service):
             to the database.
         """
         
-        # DEBUG
-        print("Running consistency check...")
+        # TEST: cancellazione file nella directory di primary e non primary fs.
+        
+        print(f"[{utils.current_timestamp()}] Running consistency check...")
+        
+        # Check whether the token is valid.
+        payload = utils.get_token_payload(token, self._public_key)
+        
+        if payload is None:
+            print("Error running consistency check. Corrupted token.")
+            
+            return
+        
+        # Ensure that the requestor is the name server.
+        if payload["role"] != "name_server":
+            print("Error running consistency check. Requestor is not a name server.")
+            
+            return
         
         # For each file, get its checksum.
         for file in files:
@@ -446,17 +462,24 @@ class FileServer(rpyc.Service):
             # absolute path in the local storage.
             local_path = os.path.join(self.files_dir, file[0])
             
-            # Calculate the checksum of the file.
-            checksum = utils.calculate_checksum(local_path)
+            # If the file exists, calculate its checksum.
+            if os.path.exists(local_path):
+                checksum = utils.calculate_checksum(local_path)
+                
+                # If the file is corrupted, demand database update to the name server.
+                if file[1] != checksum:
+                    # DEBUG
+                    print(f"File {file[0]} is corrupted.")
+                    
+                    result = self.conn.root.handle_file_inconsistency(self.token, file[0])
+                    print(result)
             
-            # Try to match the checksums.
-            if file[1] != checksum:
+            # If the file does not exist, demand database update to the name server.
+            else:
                 # DEBUG
-                print(f"File {file[0]} is corrupted.")
+                print(f"File {file[0]} does not exist.")
                 
-                # Demand database update to the name server.
                 result = self.conn.root.handle_file_inconsistency(self.token, file[0])
-                
                 print(result)
 
 
