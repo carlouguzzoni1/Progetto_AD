@@ -21,7 +21,9 @@ LOCKFILE_PATH = config['lockfile_path']
 
 
 class RootClient(BaseClient):
-    """Client class for root user. Root client is a singleton."""
+    """
+    Client class for root user. Root client is a singleton.
+    """
     
     # IMPROVE: si potrebbe consentire al root client di cancellare files od utenti,
     #          in modo forzato, qualora essi violassero le policy dell'amministratore.
@@ -44,7 +46,9 @@ class RootClient(BaseClient):
     
     
     def __new__(cls, *args, **kwargs):
-        """Creates a new root client."""
+        """
+        Creates a new root client.
+        """
         
         if cls._instance is None:
             # Check if root client is already running.
@@ -64,6 +68,7 @@ class RootClient(BaseClient):
     def __init__(self, host, port):
         """
         Initializes the root client.
+        
         Args:
             host (str): The hostname or IP address of the name server.
             port (int): The port number of the name server.
@@ -73,7 +78,9 @@ class RootClient(BaseClient):
     
     
     def __del__(self):
-        """Removes the lock file when the root client is deleted."""
+        """
+        Removes the lock file when the root client is deleted.
+        """
         
         # Call the destructor of the parent class.
         super().__del__()
@@ -88,7 +95,9 @@ class RootClient(BaseClient):
     
     
     def display_commands(self):
-        """Displays the available commands for the root client."""
+        """
+        Displays the available commands for the root client.
+        """
         
         print("""
         Welcome to sym-DFS Project Root Client.
@@ -108,7 +117,9 @@ class RootClient(BaseClient):
     
     
     def main_prompt(self):
-        """Displays the main prompt for the root client."""
+        """
+        Displays the main prompt for the root client.
+        """
         
         self.display_commands() # Display the available commands.
         
@@ -233,7 +244,9 @@ class RootClient(BaseClient):
     
     
     def list_all_files(self):
-        """Lists all files in the DFS."""
+        """
+        Lists all files in the DFS.
+        """
         
         result = self.conn.root.list_all_files(self.token)
         
@@ -264,7 +277,9 @@ class RootClient(BaseClient):
     
     
     def list_all_clients(self):
-        """Lists all clients in the DFS."""
+        """
+        Lists all clients in the DFS.
+        """
         
         result = self.conn.root.list_all_clients(self.token)
         
@@ -288,7 +303,9 @@ class RootClient(BaseClient):
     
     
     def list_all_file_servers(self):
-        """Lists all file servers in the DFS."""
+        """
+        Lists all file servers in the DFS.
+        """
         
         result = self.conn.root.list_all_file_servers(self.token)
         

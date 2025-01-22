@@ -98,7 +98,9 @@ class NameServerService(rpyc.Service):
     
     
     def __new__(cls, *args, **kwargs):
-        """Creates a new name server."""
+        """
+        Creates a new name server.
+        """
         
         # NOTE: questo meccanismo di lock serve a garantire l'effettività del
         #       design pattern Singleton, dunque l'esistenza di un solo name
@@ -122,6 +124,7 @@ class NameServerService(rpyc.Service):
     def __init__(self, host=SERVER_HOST, port=SERVER_PORT):
         """
         Initializes the name server.
+        
         Args:
             host (str): The hostname or IP address of the name server.
             port (int): The port number of the name server.
@@ -146,7 +149,9 @@ class NameServerService(rpyc.Service):
     
     
     def __del__(self):
-        """Removes the lock file when the name server is deleted."""
+        """
+        Removes the lock file when the name server is deleted.
+        """
         
         print("Shutting down name server...")
         
@@ -252,11 +257,13 @@ class NameServerService(rpyc.Service):
     def exposed_create_user(self, username, password, is_root=False, root_passphrase=None):
         """
         Creates a new user.
+        
         Args:   
             username (str):         The username of the new user.
             password (str):         The password of the new user.
             is_root (bool):         Whether the new user is a root user.
             root_passphrase (str):  The passphrase of the root user.
+        
         Returns:
             dict:                   A dictionary containing the result of the operation
                                     and a message.
@@ -304,12 +311,14 @@ class NameServerService(rpyc.Service):
     def exposed_create_file_server(self, name, password, host, port, size):
         """
         Creates a new file server.
+        
         Args:
             name (str):     The name of the new file server.
             password (str): The password of the new file server.
             host (str):     The host of the new file server.
             port (int):     The port of the new file server.
             size (int):     The size of the new file server.
+        
         Returns:
             str:            A message indicating the result of the operation.
         """
@@ -347,9 +356,11 @@ class NameServerService(rpyc.Service):
     def exposed_authenticate_user(self, username, password):
         """
         Authenticates a user and sends back a JWT token.
+        
         Args:
             username (str): The username of the user.
             password (str): The password of the user.
+        
         Returns:
             dict:           A dictionary containing the result of the operation.
         """
@@ -459,9 +470,11 @@ class NameServerService(rpyc.Service):
     def exposed_authenticate_file_server(self, name, password):
         """
         Authenticates a file server.
+        
         Args:
             name (str):     The name of the file server.
             password (str): The password of the file server.
+        
         Returns:
             dict:           A dictionary containing the result of the operation.
         """
@@ -561,9 +574,11 @@ class NameServerService(rpyc.Service):
     def exposed_delete_user(self, username, password):
         """
         Deletes a user.
+        
         Args:
             username (str): The username of the user.
             password (str): The password of the user.
+        
         Returns:
             str:            A message indicating the result of the operation.
         """
@@ -657,8 +672,10 @@ class NameServerService(rpyc.Service):
     def exposed_logout_user(self, token):
         """
         Logs out an entity.
+        
         Args:
             token (str):    The JWT token of the client.
+        
         Returns:
             str:            A message indicating the result of the operation.
         """
@@ -703,8 +720,10 @@ class NameServerService(rpyc.Service):
     def exposed_logout_file_server(self, token):
         """
         Logs out a file server.
+        
         Args:
             token (str):    The JWT token of the file server.
+        
         Returns:
             str:            A message indicating the result of the operation.
         """
@@ -750,8 +769,10 @@ class NameServerService(rpyc.Service):
     def exposed_get_user_files(self, token):
         """
         Gets the files owned by a user for visualization purposes.
+        
         Args:
             token (str):    The JWT token of the user.
+        
         Returns:
             list:           A list of dictionaries containing the file information.
         """
@@ -812,11 +833,13 @@ class NameServerService(rpyc.Service):
         """
         Gets the best file server to store a client's file according to K-least
         loaded policy. In this case load is the free space of the file server.
+        
         Args:
             token (str):        The JWT token of the user.
             file_path (str):    The absolute file path in the DFS.
             file_size (int):    The size of the file.
             checksum (str):     The checksum of the file.
+        
         Returns:
             dict:               A dictionary containing the file server information.
         """
@@ -972,9 +995,11 @@ class NameServerService(rpyc.Service):
         Gets the primary server for a client which wants to download a file.
         In case the primary file server is offline, the first online file server
         available is returned.
+        
         Args:
             file_path (str):    The absolute file path in the DFS.
             token (str):        The JWT token of the requestor.
+        
         Returns:
             dict:               A dictionary containing the file server information.
         """
@@ -1074,6 +1099,7 @@ class NameServerService(rpyc.Service):
     def exposed_delete_file(self, file_path, token):
         """
         Deletes a file from the DFS.
+        
         Args:
             file_path (str):    The path of the file in the DFS.
             token (str):        The token of the requestor.
@@ -1147,6 +1173,7 @@ class NameServerService(rpyc.Service):
     def exposed_exists_root_user(self):
         """
         Checks whether there is a root user in the name server's database.
+        
         Returns:
             bool: True if there is a root user, False otherwise.
         """
@@ -1176,8 +1203,10 @@ class NameServerService(rpyc.Service):
     def exposed_list_all_files(self, token):
         """
         Lists all files in the DFS. For root clients use only.
+        
         Args:
             token (str):    The token of the requestor.
+        
         Returns:
             dict:           A dictionary with the status and the list of files.
         """
@@ -1235,8 +1264,10 @@ class NameServerService(rpyc.Service):
     def exposed_list_all_clients(self, token):
         """
         Lists all clients in the DFS. For root clients use only.
+        
         Args:
             token (str):    The token of the requestor.
+        
         Returns:
             dict:           A dictionary with the status and the list of clients.
         """
@@ -1291,8 +1322,10 @@ class NameServerService(rpyc.Service):
     def exposed_list_all_file_servers(self, token):
         """
         Lists all file servers in the DFS. For root clients use only.
+        
         Args:
             token (str):    The token of the requestor.
+        
         Returns:
             dict:           A dictionary with the status and the list of file servers.
         """
@@ -1350,6 +1383,7 @@ class NameServerService(rpyc.Service):
     def exposed_receive_activity_heartbeat(self, token):
         """
         Updates the heartbeat timestamp of a client or file server.
+        
         Args:
             token (str):    The token of the requestor.
         """
@@ -1408,6 +1442,7 @@ class NameServerService(rpyc.Service):
     def exposed_handle_file_inconsistency(self, token, file_path):
         """
         Takes actions to handle a file inconsistency found in a file server.
+        
         Args:
             token (str):        The JWT token of the file server.
             file_path (str):    The path of the file in the DFS.
@@ -1612,6 +1647,7 @@ class NameServerService(rpyc.Service):
     def periodic_replication_job(self, K):
         """
         Periodically replicates the files in the DFS up to K times.
+        
         Args:
             K (int):    The number of times to replicate the files.
         """
@@ -1752,6 +1788,7 @@ class NameServerService(rpyc.Service):
         Periodically checks the activity of the other entities in the DFS.
         Updates the status of the file servers and users if they haven't sent
         a heartbeat in the last hb_timeout seconds.
+        
         Args:
             hb_timeout (int):   The maximum time since the last heartbeat.
         """

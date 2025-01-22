@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="./">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>BaseClient module &#8212; sym-DFS-project 1.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=d1102ebc" />
+    <link rel="stylesheet" type="text/css" href="_static/basic.css?v=686e5160" />
+    <link rel="stylesheet" type="text/css" href="_static/alabaster.css?v=27fed22d" />
+    <link rel="stylesheet" type="text/css" href="_static/graphviz.css?v=4ae1632d" />
+    <script src="_static/documentation_options.js?v=f2a433a1"></script>
+    <script src="_static/doctools.js?v=9bcbadda"></script>
+    <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="FileServer module" href="FileServer.html" />
+    <link rel="prev" title="Progetto_AD" href="modules.html" />
+   
+  <link rel="stylesheet" href="_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="module-BaseClient">
+<span id="baseclient-module"></span><h1>BaseClient module<a class="headerlink" href="#module-BaseClient" title="Link to this heading">¶</a></h1>
+<dl class="py class">
+<dt class="sig sig-object py" id="BaseClient.BaseClient">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">BaseClient.</span></span><span class="sig-name descname"><span class="pre">BaseClient</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">host</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">port</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/BaseClient.html#BaseClient"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#BaseClient.BaseClient" title="Link to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">ABC</span></code></p>
+<p>Abstract base class for client classes.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="BaseClient.BaseClient.connect">
+<span class="sig-name descname"><span class="pre">connect</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/BaseClient.html#BaseClient.connect"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#BaseClient.BaseClient.connect" title="Link to this definition">¶</a></dt>
+<dd><p>Establishes a connection to the name server.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="BaseClient.BaseClient.create_user">
+<span class="sig-name descname"><span class="pre">create_user</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/BaseClient.html#BaseClient.create_user"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#BaseClient.BaseClient.create_user" title="Link to this definition">¶</a></dt>
+<dd><p>Creates a new regular user.</p>
+<dl class="simple">
+<dt>Returns:</dt><dd><p>bool: True if the user was created successfully, False otherwise.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="BaseClient.BaseClient.delete">
+<span class="sig-name descname"><span class="pre">delete</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/BaseClient.html#BaseClient.delete"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#BaseClient.BaseClient.delete" title="Link to this definition">¶</a></dt>
+<dd><p>User interface for deleting a file.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="BaseClient.BaseClient.delete_file">
+<span class="sig-name descname"><span class="pre">delete_file</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">server_path</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/BaseClient.html#BaseClient.delete_file"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#BaseClient.BaseClient.delete_file" title="Link to this definition">¶</a></dt>
+<dd><p>Deletes a file from the DFS.</p>
+<dl class="simple">
+<dt>Args:</dt><dd><p>server_path (str): The absolute path of the file to delete.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="BaseClient.BaseClient.delete_user">
+<span class="sig-name descname"><span class="pre">delete_user</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/BaseClient.html#BaseClient.delete_user"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#BaseClient.BaseClient.delete_user" title="Link to this definition">¶</a></dt>
+<dd><p>Deletes a regular user.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="BaseClient.BaseClient.display_commands">
+<em class="property"><span class="pre">abstract</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">display_commands</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/BaseClient.html#BaseClient.display_commands"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#BaseClient.BaseClient.display_commands" title="Link to this definition">¶</a></dt>
+<dd><p>Displays the available commands for the clients.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="BaseClient.BaseClient.download">
+<span class="sig-name descname"><span class="pre">download</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/BaseClient.html#BaseClient.download"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#BaseClient.BaseClient.download" title="Link to this definition">¶</a></dt>
+<dd><p>User interface for downloading a file.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="BaseClient.BaseClient.download_file">
+<span class="sig-name descname"><span class="pre">download_file</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">server_path</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/BaseClient.html#BaseClient.download_file"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#BaseClient.BaseClient.download_file" title="Link to this definition">¶</a></dt>
+<dd><p>Downloads a file from the DFS.</p>
+<dl class="simple">
+<dt>Args:</dt><dd><p>server_path (str): The absolute path of the file to download on the DFS.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="BaseClient.BaseClient.list_files">
+<span class="sig-name descname"><span class="pre">list_files</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/BaseClient.html#BaseClient.list_files"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#BaseClient.BaseClient.list_files" title="Link to this definition">¶</a></dt>
+<dd><p>Lists the user’s files in the DFS.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="BaseClient.BaseClient.main_prompt">
+<em class="property"><span class="pre">abstract</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">main_prompt</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/BaseClient.html#BaseClient.main_prompt"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#BaseClient.BaseClient.main_prompt" title="Link to this definition">¶</a></dt>
+<dd><p>Displays the main prompt for the clients.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="BaseClient.BaseClient.upload">
+<span class="sig-name descname"><span class="pre">upload</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/BaseClient.html#BaseClient.upload"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#BaseClient.BaseClient.upload" title="Link to this definition">¶</a></dt>
+<dd><p>User interface for uploading a file.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="BaseClient.BaseClient.upload_file">
+<span class="sig-name descname"><span class="pre">upload_file</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">client_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">server_path</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/BaseClient.html#BaseClient.upload_file"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#BaseClient.BaseClient.upload_file" title="Link to this definition">¶</a></dt>
+<dd><p>Uploads a file into the DFS.</p>
+<dl class="simple">
+<dt>Args:</dt><dd><p>client_path (str): The absolute path of the file to upload.
+server_path (str): The directory where the file will be stored.</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<div class="graphviz"><img src="_images/inheritance-c47df5db42fd47c65157d5b035938bb77a5c96db.png" alt="Inheritance diagram of BaseClient.BaseClient" usemap="#inheritance92c288a00c" class="inheritance graphviz" /></div>
+<map id="inheritance92c288a00c" name="inheritance92c288a00c">
+<area shape="rect" id="node1" href="#BaseClient.BaseClient" target="_top" title="Abstract base class for client classes." alt="" coords="5,81,171,109"/>
+</map></section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="index.html">sym-DFS-project</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="modules.html">Progetto_AD</a><ul class="current">
+<li class="toctree-l2 current"><a class="current reference internal" href="#">BaseClient module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="FileServer.html">FileServer module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="NameServer.html">NameServer module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="RegularClient.html">RegularClient module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="RootClient.html">RootClient module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="heartbeats.html">heartbeats module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="utils.html">utils module</a></li>
+</ul>
+</li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="index.html">Documentation overview</a><ul>
+  <li><a href="modules.html">Progetto_AD</a><ul>
+      <li>Previous: <a href="modules.html" title="previous chapter">Progetto_AD</a></li>
+      <li>Next: <a href="FileServer.html" title="next chapter">FileServer module</a></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2025, Carlo Uguzzoni.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 8.1.3</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+      |
+      <a href="_sources/BaseClient.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

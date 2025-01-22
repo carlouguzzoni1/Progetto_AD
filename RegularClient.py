@@ -16,7 +16,9 @@ CLIENT_BASE_DIR = "./CLI"
 
 
 class RegularClient(BaseClient):
-    """Client class for regular users."""
+    """
+    Client class for regular users.
+    """
     
     # NOTE: il regular client è pensato per essere un utente generico del DFS.
     #       Le funzionalità sono pertanto quelle di base, definite nella classe
@@ -29,6 +31,7 @@ class RegularClient(BaseClient):
     def __init__(self, host, port):
         """
         Initializes the client.
+        
         Args:
             host (str): The hostname or IP address of the name server.
             port (int): The port number of the name server.
@@ -41,7 +44,9 @@ class RegularClient(BaseClient):
     
     
     def display_commands(self):
-        """Displays the available commands for the regular clients."""
+        """
+        Displays the available commands for the regular clients.
+        """
         
         print("""
         Welcome to sym-DFS Project Client.
@@ -60,7 +65,9 @@ class RegularClient(BaseClient):
     
     
     def main_prompt(self):
-        """Main prompt for regular clients."""
+        """
+        Main prompt for regular clients.
+        """
         
         self.connect()              # Connect to the name server.
         self.display_commands()     # Display the available commands.
@@ -104,7 +111,9 @@ class RegularClient(BaseClient):
     
     
     def login(self):
-        """Authenticates a regular user."""
+        """
+        Authenticates a regular user.
+        """
         
         # Check whether a user is already logged in.
         if self.user_is_logged:
@@ -147,7 +156,9 @@ class RegularClient(BaseClient):
     
     
     def logout(self):
-        """Logs out the current user."""
+        """
+        Logs out the current user.
+        """
         
         if self.user_is_logged:
             self._cleanup()

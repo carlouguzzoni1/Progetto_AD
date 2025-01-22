@@ -44,6 +44,7 @@ class FileServer(rpyc.Service):
     def __init__(self, ns_host, ns_port):
         """
         Initializes the file server.
+        
         Args:
             ns_host (str):  The hostname or IP address of the name server.
             ns_port (int):  The port number of the name server.
@@ -79,7 +80,9 @@ class FileServer(rpyc.Service):
     
     
     def _cleanup(self):
-        """Cleans up the file server's state upon logout or keyboard interrupt."""
+        """
+        Cleans up the file server's state upon logout or keyboard interrupt.
+        """
         
         # NOTE: ampliare il cleanup con i reset di stato nel caso in cui si
         #       voglia implementare un sistema di login/logout per i file servers.
@@ -103,7 +106,9 @@ class FileServer(rpyc.Service):
     
     
     def connect(self):
-        """Establishes a connection to the name server."""
+        """
+        Establishes a connection to the name server.
+        """
         
         try:
             print("Connecting to the name server...")
@@ -119,7 +124,9 @@ class FileServer(rpyc.Service):
     
     
     def display_commands(self):
-        """Displays the available commands for the file server."""
+        """
+        Displays the available commands for the file server.
+        """
         
         print("""
             Welcome to sym-DFS Project File Server.
@@ -131,7 +138,9 @@ class FileServer(rpyc.Service):
     
     
     def main_prompt(self):
-        """Main prompt for the file server."""
+        """
+        Main prompt for the file server.
+        """
         
         self.connect()              # Connect to the name server.
         self.display_commands()     # Display the available commands.
@@ -157,7 +166,9 @@ class FileServer(rpyc.Service):
     
     
     def register(self):
-        """Registers a new file server."""
+        """
+        Registers a new file server.
+        """
         
         print("Registering new file server...")
         name        = input("Insert server's name: ")
@@ -190,7 +201,9 @@ class FileServer(rpyc.Service):
     
     
     def login(self):
-        """Logs in as an existing file server."""
+        """
+        Logs in as an existing file server.
+        """
         
         print("Logging in...")
         
@@ -236,10 +249,12 @@ class FileServer(rpyc.Service):
     def exposed_store_file(self, file_path, file_data, token):
         """
         Stores a file on the file server.
+        
         Args:
             file_path (str):        The path of the file to store.
             file_data (bytes):      The data of the file to store.
             token (str):            The token of the client.
+        
         Returns:
             dict:                   A dictionary containing the status of the operation.
         """
@@ -306,9 +321,11 @@ class FileServer(rpyc.Service):
     def exposed_send_file(self, file_path, token):
         """
         Sends a file to the client.
+        
         Args:
             file_path (str):    The path of the file to send.
             token (str):        The token of the client.
+        
         Returns:
             dict:               A dictionary containing the file data.
         """
@@ -362,6 +379,7 @@ class FileServer(rpyc.Service):
     def exposed_send_file_replicas(self, token, file_path, file_servers):
         """
         Sends a file to a list of file servers.
+        
         Args:
             file_path (str):        The path of the file to send.
             file_servers (list):    A list of file servers to send the file to.
@@ -410,13 +428,12 @@ class FileServer(rpyc.Service):
             fs_conn.close()
     
     
-    # Revisione ok fino qua <-----
-    
-    
     def exposed_garbage_collection(self, token, db_files):
         """
         Deletes all the files in the file server that are not in the list, in
         order to synchronize the file server with the database.
+        Also deletes all the empty directories.
+        
         Args:
             db_files (list):    A list of the files according to the database.
         """
@@ -460,7 +477,7 @@ class FileServer(rpyc.Service):
                 os.remove(file)
                 
                 # DEBUG
-                print(f"Deleted {file}")
+                print(f"Deleted file: {file}")
                 
             except Exception as e:
                 print("Error deleting file")
@@ -488,6 +505,7 @@ class FileServer(rpyc.Service):
     def exposed_consistency_check(self, token, files):
         """
         Checks the consistency of the files stored in the file server.
+        
         Args:
             files (list):    A list of the files and their checksums according
             to the database.
@@ -530,6 +548,7 @@ class FileServer(rpyc.Service):
                     print(result)
             
             # If the file does not exist, demand database update to the name server.
+            # This might be the case that a file transfer to the file server failed.
             else:
                 # DEBUG
                 print(f"File {file[0]} does not exist.")
@@ -547,7 +566,10 @@ if __name__ == "__main__":
     # Handle keyboard interrupts.
     signal.signal(
         signal.SIGINT,
-        partial(utils.handle_keyboard_interrupt_file_server, file_server=file_server)
+        partial(
+            utils.handle_keyboard_interrupt_file_server,
+            file_server=file_server
+            )
         )
     
     # Prompt is displayed until a login is successful.
@@ -556,8 +578,8 @@ if __name__ == "__main__":
     # Start the file server.
     server = ThreadedServer(
         file_server,
-        hostname=file_server.host,
-        port=file_server.port
+        hostname    =file_server.host,
+        port        =file_server.port
         )
     
     # Associate the ThreadedServer to the file server.

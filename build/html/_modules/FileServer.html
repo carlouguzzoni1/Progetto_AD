@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FileServer &#8212; sym-DFS-project 1.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=d1102ebc" />
+    <link rel="stylesheet" type="text/css" href="../_static/basic.css?v=686e5160" />
+    <link rel="stylesheet" type="text/css" href="../_static/alabaster.css?v=27fed22d" />
+    <link rel="stylesheet" type="text/css" href="../_static/graphviz.css?v=4ae1632d" />
+    <script src="../_static/documentation_options.js?v=f2a433a1"></script>
+    <script src="../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <h1>Source code for FileServer</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span> <span class="nn">functools</span> <span class="kn">import</span> <span class="n">partial</span>
+<span class="kn">import</span> <span class="nn">json</span>
+<span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">import</span> <span class="nn">signal</span>
+<span class="kn">import</span> <span class="nn">sys</span>
+<span class="kn">import</span> <span class="nn">rpyc</span>
+<span class="kn">from</span> <span class="nn">rpyc.utils.server</span> <span class="kn">import</span> <span class="n">ThreadedServer</span>
+<span class="kn">from</span> <span class="nn">getpass</span> <span class="kn">import</span> <span class="n">getpass</span>
+<span class="kn">import</span> <span class="nn">heartbeats</span>
+<span class="kn">from</span> <span class="nn">apscheduler.schedulers.background</span> <span class="kn">import</span> <span class="n">BackgroundScheduler</span>
+<span class="kn">import</span> <span class="nn">utils</span>
+
+
+
+<span class="c1"># Load configuration from file.</span>
+<span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="s1">&#39;fileserver_config.json&#39;</span><span class="p">,</span> <span class="s1">&#39;r&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">file</span><span class="p">:</span>
+    <span class="n">config</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">file</span><span class="p">)</span>
+
+<span class="n">FS_ROOT_DIR</span> <span class="o">=</span> <span class="n">config</span><span class="p">[</span><span class="s1">&#39;root_dir&#39;</span><span class="p">]</span>
+
+
+
+<div class="viewcode-block" id="FileServer">
+<a class="viewcode-back" href="../FileServer.html#FileServer.FileServer">[docs]</a>
+<span class="k">class</span> <span class="nc">FileServer</span><span class="p">(</span><span class="n">rpyc</span><span class="o">.</span><span class="n">Service</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Implements the file server, which is a storage node in the sym-DFS</span>
+<span class="sd">    architecture.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    
+    <span class="c1"># NOTE: per ora è permessa solo la cancellazione di utenti. Il progetto</span>
+    <span class="c1">#       è pensato per simulare un piccolo DFS, quindi non dovrebbe</span>
+    <span class="c1">#       accadere spesso che un file server venga rimosso.</span>
+    <span class="c1">#       Nel caso, implementare la cancellazione dei file servers è</span>
+    <span class="c1">#       un task relativamente semplice. Esempio:</span>
+    <span class="c1">#           1. aggiungere il campo is_deleted a tutti i files</span>
+    <span class="c1">#           2. assegnare ad un altro primary file server (tra quelli</span>
+    <span class="c1">#              che ospitano una replica) tutti i files che avevano</span>
+    <span class="c1">#              come primary file server quello da cancellare</span>
+    <span class="c1">#           3. marcare tutti i files a cui non si è trovata una nuova</span>
+    <span class="c1">#              sistemazione come &quot;deleted&quot;</span>
+    <span class="c1">#           4. cancellare le entry relative al file server e le repliche</span>
+    <span class="c1">#              in suo possesso</span>
+    <span class="c1">#           5. facoltativo: cancellare le directory di storage locali</span>
+    
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">ns_host</span><span class="p">,</span> <span class="n">ns_port</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Initializes the file server.</span>
+<span class="sd">        </span>
+<span class="sd">        Args:</span>
+<span class="sd">            ns_host (str):  The hostname or IP address of the name server.</span>
+<span class="sd">            ns_port (int):  The port number of the name server.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        
+        <span class="bp">self</span><span class="o">.</span><span class="n">ns_host</span>        <span class="o">=</span> <span class="n">ns_host</span>       <span class="c1"># Host for the name server.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">ns_port</span>        <span class="o">=</span> <span class="n">ns_port</span>       <span class="c1"># Port for the name server.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">conn</span>           <span class="o">=</span> <span class="kc">None</span>          <span class="c1"># Connection to the name server.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">host</span>           <span class="o">=</span> <span class="kc">None</span>          <span class="c1"># Host for the file server.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">port</span>           <span class="o">=</span> <span class="kc">None</span>          <span class="c1"># Port for the file server.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">files_dir</span>      <span class="o">=</span> <span class="n">FS_ROOT_DIR</span>   <span class="c1"># The storage directory of the file server.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">name</span>           <span class="o">=</span> <span class="kc">None</span>          <span class="c1"># The name of the file server.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">token</span>          <span class="o">=</span> <span class="kc">None</span>          <span class="c1"># The JWT token of the file server.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">scheduler</span>      <span class="o">=</span> <span class="kc">None</span>          <span class="c1"># The job scheduler.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_public_key</span>    <span class="o">=</span> <span class="kc">None</span>          <span class="c1"># Public key for JWT tokens.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_server</span>        <span class="o">=</span> <span class="kc">None</span>          <span class="c1"># The ThreadedServer instance for the file server.</span>
+    
+    
+    <span class="k">def</span> <span class="fm">__del__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Tries to update the file server&#39;s status in the name server&#39;s database</span>
+<span class="sd">        (to False) and close connection upon deletion.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Shutting down file server...&quot;</span><span class="p">)</span>
+        
+        <span class="c1"># Close the connection.</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Closing the connection to the name server...&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">conn</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+    
+    
+    <span class="c1">##### PRIVATE METHODS #####</span>
+    
+    
+    <span class="k">def</span> <span class="nf">_cleanup</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Cleans up the file server&#39;s state upon logout or keyboard interrupt.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        
+        <span class="c1"># NOTE: ampliare il cleanup con i reset di stato nel caso in cui si</span>
+        <span class="c1">#       voglia implementare un sistema di login/logout per i file servers.</span>
+        
+        <span class="c1"># Update the file server&#39;s status in the name server&#39;s database.</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Logging out...&quot;</span><span class="p">)</span>
+        
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">result</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">conn</span><span class="o">.</span><span class="n">root</span><span class="o">.</span><span class="n">logout_file_server</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">token</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+        
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Error logging out: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        
+        <span class="c1"># Stop the scheduler.</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Shutting down the job scheduler...&quot;</span><span class="p">)</span>
+        
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">scheduler</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">scheduler</span><span class="o">.</span><span class="n">remove_all_jobs</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">scheduler</span><span class="o">.</span><span class="n">shutdown</span><span class="p">()</span>
+    
+    
+<div class="viewcode-block" id="FileServer.connect">
+<a class="viewcode-back" href="../FileServer.html#FileServer.FileServer.connect">[docs]</a>
+    <span class="k">def</span> <span class="nf">connect</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Establishes a connection to the name server.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        
+        <span class="k">try</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Connecting to the name server...&quot;</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">conn</span> <span class="o">=</span> <span class="n">rpyc</span><span class="o">.</span><span class="n">connect</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">ns_host</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">ns_port</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Connection established.&quot;</span><span class="p">)</span>
+        
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Error connecting to the server: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="n">exit</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span></div>
+
+    
+    
+    <span class="c1">##### USER INTERACTION METHODS #####</span>
+    
+    
+<div class="viewcode-block" id="FileServer.display_commands">
+<a class="viewcode-back" href="../FileServer.html#FileServer.FileServer.display_commands">[docs]</a>
+    <span class="k">def</span> <span class="nf">display_commands</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Displays the available commands for the file server.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">            Welcome to sym-DFS Project File Server.</span>
+<span class="s2">            Commands:</span>
+<span class="s2">            register        Register a new file server</span>
+<span class="s2">            login           Log in as an existing file server</span>
+<span class="s2">            exit            Exit</span>
+<span class="s2">        &quot;&quot;&quot;</span><span class="p">)</span></div>
+
+    
+    
+<div class="viewcode-block" id="FileServer.main_prompt">
+<a class="viewcode-back" href="../FileServer.html#FileServer.FileServer.main_prompt">[docs]</a>
+    <span class="k">def</span> <span class="nf">main_prompt</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Main prompt for the file server.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        
+        <span class="bp">self</span><span class="o">.</span><span class="n">connect</span><span class="p">()</span>              <span class="c1"># Connect to the name server.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">display_commands</span><span class="p">()</span>     <span class="c1"># Display the available commands.</span>
+        
+        <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+            <span class="c1"># Get user input.</span>
+            <span class="n">command</span> <span class="o">=</span> <span class="nb">input</span><span class="p">(</span><span class="s2">&quot;(</span><span class="si">{}</span><span class="s2">)&gt; &quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="p">)</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">name</span> <span class="k">else</span> <span class="s2">&quot;(fs prompt)&gt; &quot;</span><span class="p">)</span>
+            
+            <span class="c1"># Execute the command.</span>
+            <span class="k">match</span> <span class="n">command</span><span class="p">:</span>
+                <span class="k">case</span> <span class="s2">&quot;register&quot;</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">register</span><span class="p">()</span>
+                <span class="k">case</span> <span class="s2">&quot;login&quot;</span><span class="p">:</span>
+                    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">login</span><span class="p">():</span>
+                        <span class="k">break</span>                    
+                <span class="k">case</span> <span class="s2">&quot;exit&quot;</span><span class="p">:</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Exiting...&quot;</span><span class="p">)</span>
+                    <span class="c1"># Close the connection.</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">conn</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+                    <span class="n">exit</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+                <span class="k">case</span><span class="w"> </span><span class="k">_</span><span class="p">:</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Unknown command.&quot;</span><span class="p">)</span></div>
+
+    
+    
+<div class="viewcode-block" id="FileServer.register">
+<a class="viewcode-back" href="../FileServer.html#FileServer.FileServer.register">[docs]</a>
+    <span class="k">def</span> <span class="nf">register</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Registers a new file server.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Registering new file server...&quot;</span><span class="p">)</span>
+        <span class="n">name</span>        <span class="o">=</span> <span class="nb">input</span><span class="p">(</span><span class="s2">&quot;Insert server&#39;s name: &quot;</span><span class="p">)</span>
+        <span class="n">password</span>    <span class="o">=</span> <span class="n">getpass</span><span class="p">(</span><span class="s2">&quot;Insert password: &quot;</span><span class="p">)</span>
+        <span class="n">host</span>        <span class="o">=</span> <span class="nb">input</span><span class="p">(</span><span class="s2">&quot;Insert server&#39;s host: &quot;</span><span class="p">)</span>
+        <span class="n">port</span>        <span class="o">=</span> <span class="nb">input</span><span class="p">(</span><span class="s2">&quot;Insert server&#39;s port: &quot;</span><span class="p">)</span>
+        <span class="n">size</span>        <span class="o">=</span> <span class="nb">input</span><span class="p">(</span><span class="s2">&quot;Insert server&#39;s size (in bytes): &quot;</span><span class="p">)</span>
+        
+        <span class="c1"># Check if host is localhost or a valid IP address.</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">utils</span><span class="o">.</span><span class="n">is_valid_host</span><span class="p">(</span><span class="n">host</span><span class="p">):</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Invalid host. Must be localhost or a valid IP address.&quot;</span><span class="p">)</span>
+            
+            <span class="k">return</span>
+        
+        <span class="c1"># Check if port is a positive integer between 1 and 65535.</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="mi">1</span> <span class="o">&lt;=</span> <span class="nb">int</span><span class="p">(</span><span class="n">port</span><span class="p">)</span> <span class="o">&lt;=</span> <span class="mi">65535</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Invalid port. Must be between 1 and 65535.&quot;</span><span class="p">)</span>
+            
+            <span class="k">return</span>
+        
+        <span class="c1"># Check if the size is a positive integer.</span>
+        <span class="k">if</span> <span class="nb">int</span><span class="p">(</span><span class="n">size</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Invalid size. Must be a positive integer.&quot;</span><span class="p">)</span>
+            
+            <span class="k">return</span>
+        
+        <span class="n">result</span>      <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">conn</span><span class="o">.</span><span class="n">root</span><span class="o">.</span><span class="n">create_file_server</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">password</span><span class="p">,</span> <span class="n">host</span><span class="p">,</span> <span class="n">port</span><span class="p">,</span> <span class="n">size</span><span class="p">)</span>
+        
+        <span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="p">)</span></div>
+
+    
+    
+<div class="viewcode-block" id="FileServer.login">
+<a class="viewcode-back" href="../FileServer.html#FileServer.FileServer.login">[docs]</a>
+    <span class="k">def</span> <span class="nf">login</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Logs in as an existing file server.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Logging in...&quot;</span><span class="p">)</span>
+        
+        <span class="n">name</span>        <span class="o">=</span> <span class="nb">input</span><span class="p">(</span><span class="s2">&quot;Insert server&#39;s name: &quot;</span><span class="p">)</span>
+        <span class="n">password</span>    <span class="o">=</span> <span class="n">getpass</span><span class="p">(</span><span class="s2">&quot;Insert password: &quot;</span><span class="p">)</span>
+        
+        <span class="n">result</span>      <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">conn</span><span class="o">.</span><span class="n">root</span><span class="o">.</span><span class="n">authenticate_file_server</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">password</span><span class="p">)</span>
+        
+        <span class="k">if</span> <span class="n">result</span><span class="p">[</span><span class="s2">&quot;status&quot;</span><span class="p">]:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">host</span>           <span class="o">=</span> <span class="n">result</span><span class="p">[</span><span class="s2">&quot;host&quot;</span><span class="p">]</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">port</span>           <span class="o">=</span> <span class="n">result</span><span class="p">[</span><span class="s2">&quot;port&quot;</span><span class="p">]</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">files_dir</span>      <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">files_dir</span><span class="p">,</span> <span class="n">name</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">name</span>           <span class="o">=</span> <span class="n">name</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">token</span>          <span class="o">=</span> <span class="n">result</span><span class="p">[</span><span class="s2">&quot;token&quot;</span><span class="p">]</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_public_key</span>    <span class="o">=</span> <span class="n">result</span><span class="p">[</span><span class="s2">&quot;public_key&quot;</span><span class="p">]</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">scheduler</span>      <span class="o">=</span> <span class="n">BackgroundScheduler</span><span class="p">()</span>
+            
+            <span class="c1"># Add activity heartbeat job.</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Starting periodic activity heartbeat job...&quot;</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">scheduler</span><span class="o">.</span><span class="n">add_job</span><span class="p">(</span>
+                <span class="n">heartbeats</span><span class="o">.</span><span class="n">send_activity_heartbeat</span><span class="p">,</span>
+                <span class="n">args</span><span class="o">=</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">conn</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">token</span><span class="p">],</span>
+                <span class="n">trigger</span><span class="o">=</span><span class="s1">&#39;interval&#39;</span><span class="p">,</span>
+                <span class="n">seconds</span><span class="o">=</span><span class="mi">30</span><span class="p">,</span>
+                <span class="nb">id</span><span class="o">=</span><span class="s2">&quot;activity_heartbeat&quot;</span>
+                <span class="p">)</span>
+            
+            <span class="c1"># Start the scheduler.</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">scheduler</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
+            
+            <span class="c1"># Check whether the file server actually has a local storage directory associated.</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">files_dir</span><span class="p">):</span>
+                <span class="n">os</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">files_dir</span><span class="p">)</span>   <span class="c1"># Create the directory.</span>
+        
+        <span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="p">[</span><span class="s2">&quot;message&quot;</span><span class="p">])</span>
+        
+        <span class="k">return</span> <span class="n">result</span><span class="p">[</span><span class="s2">&quot;status&quot;</span><span class="p">]</span></div>
+
+    
+    
+    <span class="c1">##### CLIENTS RPCs #####</span>
+    
+    
+<div class="viewcode-block" id="FileServer.exposed_store_file">
+<a class="viewcode-back" href="../FileServer.html#FileServer.FileServer.exposed_store_file">[docs]</a>
+    <span class="k">def</span> <span class="nf">exposed_store_file</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">file_path</span><span class="p">,</span> <span class="n">file_data</span><span class="p">,</span> <span class="n">token</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Stores a file on the file server.</span>
+<span class="sd">        </span>
+<span class="sd">        Args:</span>
+<span class="sd">            file_path (str):        The path of the file to store.</span>
+<span class="sd">            file_data (bytes):      The data of the file to store.</span>
+<span class="sd">            token (str):            The token of the client.</span>
+<span class="sd">        </span>
+<span class="sd">        Returns:</span>
+<span class="sd">            dict:                   A dictionary containing the status of the operation.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        
+        <span class="c1"># DEBUG</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Storing file &#39;</span><span class="si">{</span><span class="n">file_path</span><span class="si">}</span><span class="s2">&#39;...&quot;</span><span class="p">)</span>
+        
+        <span class="c1"># Verify the token.</span>
+        <span class="n">payload</span> <span class="o">=</span> <span class="n">utils</span><span class="o">.</span><span class="n">get_token_payload</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_public_key</span><span class="p">)</span>
+        
+        <span class="k">if</span> <span class="n">payload</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="p">{</span>
+                <span class="s2">&quot;status&quot;</span><span class="p">:</span>   <span class="kc">False</span><span class="p">,</span>
+                <span class="s2">&quot;message&quot;</span><span class="p">:</span>  <span class="s2">&quot;Error storing file. Corrupted token.&quot;</span>
+                <span class="p">}</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">username</span> <span class="o">=</span> <span class="n">payload</span><span class="p">[</span><span class="s2">&quot;username&quot;</span><span class="p">]</span>
+        
+        <span class="c1"># Check whether the requestor is the owner of the file.</span>
+        <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="n">file_path</span><span class="p">)</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;/&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span> <span class="o">!=</span> <span class="n">username</span><span class="p">:</span>
+            <span class="k">return</span> <span class="p">{</span>
+                <span class="s2">&quot;status&quot;</span><span class="p">:</span>   <span class="kc">False</span><span class="p">,</span>
+                <span class="s2">&quot;message&quot;</span><span class="p">:</span>  <span class="s2">&quot;Error storing file. Requestor is not owner.&quot;</span>
+                <span class="p">}</span>
+        
+        <span class="c1"># Get the base directory in the file server storage.</span>
+        <span class="nb">dir</span>         <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">files_dir</span>
+        
+        <span class="c1"># Split the file path into directories.</span>
+        <span class="n">directories</span> <span class="o">=</span> <span class="n">file_path</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;/&quot;</span><span class="p">)</span>
+        
+        <span class="c1"># Get the file name.</span>
+        <span class="n">file_name</span>   <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">basename</span><span class="p">(</span><span class="n">file_path</span><span class="p">)</span>
+        
+        <span class="c1"># Create the directories (if needed).</span>
+        <span class="k">for</span> <span class="n">directory</span> <span class="ow">in</span> <span class="n">directories</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">]:</span>
+            <span class="nb">dir</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="nb">dir</span><span class="p">,</span> <span class="n">directory</span><span class="p">)</span>
+            
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="nb">dir</span><span class="p">):</span>
+                <span class="n">os</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="nb">dir</span><span class="p">)</span>
+        
+        <span class="c1"># Create the new file path.</span>
+        <span class="n">file_path</span>   <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="nb">dir</span><span class="p">,</span> <span class="n">file_name</span><span class="p">)</span>
+        
+        <span class="c1"># Try to store the file.</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">file_path</span><span class="p">,</span> <span class="s2">&quot;wb&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">file</span><span class="p">:</span>
+                <span class="n">file</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">file_data</span><span class="p">)</span>
+            
+            <span class="k">return</span> <span class="p">{</span>
+                <span class="s2">&quot;status&quot;</span><span class="p">:</span>   <span class="kc">True</span><span class="p">,</span>
+                <span class="s2">&quot;message&quot;</span><span class="p">:</span>  <span class="s2">&quot;File stored successfully.&quot;</span>
+                <span class="p">}</span>
+        
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Error storing file &#39;</span><span class="si">{</span><span class="n">file_name</span><span class="si">}</span><span class="s2">&#39;: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            
+            <span class="k">return</span> <span class="p">{</span>
+                <span class="s2">&quot;status&quot;</span><span class="p">:</span>   <span class="kc">False</span><span class="p">,</span>
+                <span class="s2">&quot;message&quot;</span><span class="p">:</span>  <span class="s2">&quot;Error storing file.&quot;</span>
+                <span class="p">}</span></div>
+
+    
+    
+<div class="viewcode-block" id="FileServer.exposed_send_file">
+<a class="viewcode-back" href="../FileServer.html#FileServer.FileServer.exposed_send_file">[docs]</a>
+    <span class="k">def</span> <span class="nf">exposed_send_file</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">file_path</span><span class="p">,</span> <span class="n">token</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Sends a file to the client.</span>
+<span class="sd">        </span>
+<span class="sd">        Args:</span>
+<span class="sd">            file_path (str):    The path of the file to send.</span>
+<span class="sd">            token (str):        The token of the client.</span>
+<span class="sd">        </span>
+<span class="sd">        Returns:</span>
+<span class="sd">            dict:               A dictionary containing the file data.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        
+        <span class="c1"># DEBUG</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Sending file &#39;</span><span class="si">{</span><span class="n">file_path</span><span class="si">}</span><span class="s2">&#39;...&quot;</span><span class="p">)</span>
+        
+        <span class="c1"># Get the username from the token.</span>
+        <span class="n">payload</span> <span class="o">=</span> <span class="n">utils</span><span class="o">.</span><span class="n">get_token_payload</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_public_key</span><span class="p">)</span>
+        
+        <span class="k">if</span> <span class="n">payload</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="p">{</span>
+                <span class="s2">&quot;status&quot;</span><span class="p">:</span>   <span class="kc">False</span><span class="p">,</span>
+                <span class="s2">&quot;message&quot;</span><span class="p">:</span>  <span class="s2">&quot;Error sending file. Corrupted token.&quot;</span>
+                <span class="p">}</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">username</span> <span class="o">=</span> <span class="n">payload</span><span class="p">[</span><span class="s2">&quot;username&quot;</span><span class="p">]</span>
+        
+        <span class="c1"># Check whether the username applying the request is the same as the owner.</span>
+        <span class="c1"># username must be the same as the higher directory in the file path.</span>
+        <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="n">file_path</span><span class="p">)</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;/&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span> <span class="o">!=</span> <span class="n">username</span><span class="p">:</span>
+            <span class="k">return</span> <span class="p">{</span>
+                <span class="s2">&quot;status&quot;</span><span class="p">:</span>   <span class="kc">False</span><span class="p">,</span>
+                <span class="s2">&quot;message&quot;</span><span class="p">:</span>  <span class="s2">&quot;User does not own the file. Access denied.&quot;</span>
+                <span class="p">}</span>
+        
+        <span class="c1"># Combine the root directory with the file path to get the absolute file path.</span>
+        <span class="n">file_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">files_dir</span><span class="p">,</span> <span class="n">file_path</span><span class="p">)</span>
+        
+        <span class="c1"># Check if the file exists.</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">file_path</span><span class="p">):</span>
+            <span class="k">return</span> <span class="p">{</span>
+                <span class="s2">&quot;status&quot;</span><span class="p">:</span>   <span class="kc">False</span><span class="p">,</span>
+                <span class="s2">&quot;message&quot;</span><span class="p">:</span>  <span class="s2">&quot;File not found.&quot;</span>
+                <span class="p">}</span>
+        
+        <span class="c1"># Read the file data.</span>
+        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">file_path</span><span class="p">,</span> <span class="s2">&quot;rb&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">file</span><span class="p">:</span>
+            <span class="n">file_data</span> <span class="o">=</span> <span class="n">file</span><span class="o">.</span><span class="n">read</span><span class="p">()</span>
+            
+            <span class="k">return</span> <span class="p">{</span>
+                <span class="s2">&quot;status&quot;</span><span class="p">:</span>       <span class="kc">True</span><span class="p">,</span>
+                <span class="s2">&quot;file_data&quot;</span><span class="p">:</span>    <span class="n">file_data</span><span class="p">,</span>
+                <span class="s2">&quot;message&quot;</span><span class="p">:</span>      <span class="s2">&quot;File received successfully.&quot;</span>
+                <span class="p">}</span></div>
+
+    
+    
+    <span class="c1">##### NAME SERVER RPCs #####</span>
+    
+    
+<div class="viewcode-block" id="FileServer.exposed_send_file_replicas">
+<a class="viewcode-back" href="../FileServer.html#FileServer.FileServer.exposed_send_file_replicas">[docs]</a>
+    <span class="k">def</span> <span class="nf">exposed_send_file_replicas</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">token</span><span class="p">,</span> <span class="n">file_path</span><span class="p">,</span> <span class="n">file_servers</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Sends a file to a list of file servers.</span>
+<span class="sd">        </span>
+<span class="sd">        Args:</span>
+<span class="sd">            file_path (str):        The path of the file to send.</span>
+<span class="sd">            file_servers (list):    A list of file servers to send the file to.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        
+        <span class="c1"># DEBUG</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Received request to send replicas for file &#39;</span><span class="si">{</span><span class="n">file_path</span><span class="si">}</span><span class="s2">&#39;.&quot;</span><span class="p">)</span>
+        
+        <span class="c1"># Check whether the token is valid.</span>
+        <span class="n">payload</span> <span class="o">=</span> <span class="n">utils</span><span class="o">.</span><span class="n">get_token_payload</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_public_key</span><span class="p">)</span>
+        
+        <span class="k">if</span> <span class="n">payload</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Error sending file replicas. Corrupted token.&quot;</span><span class="p">)</span>
+            
+            <span class="k">return</span>
+        
+        <span class="c1"># Ensure that the requestor is the name server.</span>
+        <span class="k">if</span> <span class="n">payload</span><span class="p">[</span><span class="s2">&quot;role&quot;</span><span class="p">]</span> <span class="o">!=</span> <span class="s2">&quot;name_server&quot;</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Error sending file replicas. Requestor is not a name server.&quot;</span><span class="p">)</span>
+            
+            <span class="k">return</span>
+        
+        <span class="c1"># Iterate through the file servers and send the file.</span>
+        <span class="k">for</span> <span class="n">server</span> <span class="ow">in</span> <span class="n">file_servers</span><span class="p">:</span>
+            <span class="c1"># DEBUG</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Sending replica to file server </span><span class="si">{</span><span class="n">server</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="si">}</span><span class="s2">...&quot;</span><span class="p">)</span>
+            
+            <span class="c1"># Connect to the file server. server is a list of tuples.</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">fs_conn</span>         <span class="o">=</span> <span class="n">rpyc</span><span class="o">.</span><span class="n">connect</span><span class="p">(</span><span class="n">server</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">server</span><span class="p">[</span><span class="mi">2</span><span class="p">])</span>
+                
+            <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Error connecting to file server </span><span class="si">{</span><span class="n">server</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                <span class="k">continue</span>
+            
+            <span class="c1"># Add the base directory to the file path.</span>
+            <span class="n">abs_file_path</span>   <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">files_dir</span><span class="p">,</span> <span class="n">file_path</span><span class="p">)</span>
+            
+            <span class="c1"># Send the replica to the file server.</span>
+            <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">abs_file_path</span><span class="p">,</span> <span class="s2">&quot;rb&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">file</span><span class="p">:</span>
+                <span class="n">file_data</span>   <span class="o">=</span> <span class="n">file</span><span class="o">.</span><span class="n">read</span><span class="p">()</span>
+                <span class="n">result</span>      <span class="o">=</span> <span class="n">fs_conn</span><span class="o">.</span><span class="n">root</span><span class="o">.</span><span class="n">store_file</span><span class="p">(</span><span class="n">file_path</span><span class="p">,</span> <span class="n">file_data</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">token</span><span class="p">)</span>
+                
+                <span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="p">[</span><span class="s2">&quot;message&quot;</span><span class="p">])</span>
+            
+            <span class="n">fs_conn</span><span class="o">.</span><span class="n">close</span><span class="p">()</span></div>
+
+    
+    
+<div class="viewcode-block" id="FileServer.exposed_garbage_collection">
+<a class="viewcode-back" href="../FileServer.html#FileServer.FileServer.exposed_garbage_collection">[docs]</a>
+    <span class="k">def</span> <span class="nf">exposed_garbage_collection</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">token</span><span class="p">,</span> <span class="n">db_files</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Deletes all the files in the file server that are not in the list, in</span>
+<span class="sd">        order to synchronize the file server with the database.</span>
+<span class="sd">        Also deletes all the empty directories.</span>
+<span class="sd">        </span>
+<span class="sd">        Args:</span>
+<span class="sd">            db_files (list):    A list of the files according to the database.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[</span><span class="si">{</span><span class="n">utils</span><span class="o">.</span><span class="n">current_timestamp</span><span class="p">()</span><span class="si">}</span><span class="s2">] Running garbage collection...&quot;</span><span class="p">)</span>
+        
+        <span class="c1"># Check whether the token is valid.</span>
+        <span class="n">payload</span> <span class="o">=</span> <span class="n">utils</span><span class="o">.</span><span class="n">get_token_payload</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_public_key</span><span class="p">)</span>
+        
+        <span class="k">if</span> <span class="n">payload</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Error starting garbage collection. Corrupted token.&quot;</span><span class="p">)</span>
+            
+            <span class="k">return</span>
+        
+        <span class="c1"># Ensure that the requestor is the name server.</span>
+        <span class="k">if</span> <span class="n">payload</span><span class="p">[</span><span class="s2">&quot;role&quot;</span><span class="p">]</span> <span class="o">!=</span> <span class="s2">&quot;name_server&quot;</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Error starting garbage collection. Requestor is not a name server.&quot;</span><span class="p">)</span>
+            
+            <span class="k">return</span>
+        
+        <span class="c1"># Transform the list of tuples to a list of strings.</span>
+        <span class="n">db_files</span> <span class="o">=</span> <span class="p">[</span><span class="n">file</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="k">for</span> <span class="n">file</span> <span class="ow">in</span> <span class="n">db_files</span><span class="p">]</span>
+        
+        <span class="c1"># Get all the files in the local storage.</span>
+        <span class="n">local_files</span> <span class="o">=</span> <span class="p">[]</span>
+        
+        <span class="k">for</span> <span class="n">root</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">files</span> <span class="ow">in</span> <span class="n">os</span><span class="o">.</span><span class="n">walk</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">files_dir</span><span class="p">):</span>
+            <span class="k">for</span> <span class="n">file</span> <span class="ow">in</span> <span class="n">files</span><span class="p">:</span>
+                <span class="n">local_files</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">root</span><span class="p">,</span> <span class="n">file</span><span class="p">))</span>
+        
+        <span class="c1"># Add the storage directory to every file received, so to get its</span>
+        <span class="c1"># absolute path in the local storage.</span>
+        <span class="n">db_files</span> <span class="o">=</span> <span class="p">[</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">files_dir</span><span class="p">,</span> <span class="n">file</span><span class="p">)</span> <span class="k">for</span> <span class="n">file</span> <span class="ow">in</span> <span class="n">db_files</span><span class="p">]</span>
+        
+        <span class="c1"># Get the files to delete as the difference between the two lists.</span>
+        <span class="n">files_to_delete</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="n">local_files</span><span class="p">)</span> <span class="o">-</span> <span class="nb">set</span><span class="p">(</span><span class="n">db_files</span><span class="p">))</span>
+        
+        <span class="c1"># Delete all the files that are not in the list from the local storage.</span>
+        <span class="k">for</span> <span class="n">file</span> <span class="ow">in</span> <span class="n">files_to_delete</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">os</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="n">file</span><span class="p">)</span>
+                
+                <span class="c1"># DEBUG</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Deleted file: </span><span class="si">{</span><span class="n">file</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                
+            <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Error deleting file&quot;</span><span class="p">)</span>
+        
+        <span class="c1"># Delete all empty directories in the local storage.</span>
+        <span class="k">for</span> <span class="n">root</span><span class="p">,</span> <span class="n">dirs</span><span class="p">,</span> <span class="n">_</span> <span class="ow">in</span> <span class="n">os</span><span class="o">.</span><span class="n">walk</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">files_dir</span><span class="p">):</span>
+            <span class="k">for</span> <span class="nb">dir</span> <span class="ow">in</span> <span class="n">dirs</span><span class="p">:</span>
+                
+                <span class="c1"># Get the relative path of the directory.</span>
+                <span class="n">dir_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">root</span><span class="p">,</span> <span class="nb">dir</span><span class="p">)</span>
+                
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">listdir</span><span class="p">(</span><span class="n">dir_path</span><span class="p">):</span>
+                    <span class="c1"># Try to remove the empty directory</span>
+                    <span class="k">try</span><span class="p">:</span>
+                        <span class="c1"># os.rmdir works only if the directory is empty anyways.</span>
+                        <span class="n">os</span><span class="o">.</span><span class="n">rmdir</span><span class="p">(</span><span class="n">dir_path</span><span class="p">)</span>
+                        
+                        <span class="c1"># DEBUG</span>
+                        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Deleted empty directory: </span><span class="si">{</span><span class="n">dir_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                    
+                    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Error deleting empty directory&quot;</span><span class="p">)</span></div>
+
+    
+    
+<div class="viewcode-block" id="FileServer.exposed_consistency_check">
+<a class="viewcode-back" href="../FileServer.html#FileServer.FileServer.exposed_consistency_check">[docs]</a>
+    <span class="k">def</span> <span class="nf">exposed_consistency_check</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">token</span><span class="p">,</span> <span class="n">files</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Checks the consistency of the files stored in the file server.</span>
+<span class="sd">        </span>
+<span class="sd">        Args:</span>
+<span class="sd">            files (list):    A list of the files and their checksums according</span>
+<span class="sd">            to the database.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        
+        <span class="c1"># TEST: cancellazione file nella directory di primary e non primary fs.</span>
+        
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[</span><span class="si">{</span><span class="n">utils</span><span class="o">.</span><span class="n">current_timestamp</span><span class="p">()</span><span class="si">}</span><span class="s2">] Running consistency check...&quot;</span><span class="p">)</span>
+        
+        <span class="c1"># Check whether the token is valid.</span>
+        <span class="n">payload</span> <span class="o">=</span> <span class="n">utils</span><span class="o">.</span><span class="n">get_token_payload</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_public_key</span><span class="p">)</span>
+        
+        <span class="k">if</span> <span class="n">payload</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Error running consistency check. Corrupted token.&quot;</span><span class="p">)</span>
+            
+            <span class="k">return</span>
+        
+        <span class="c1"># Ensure that the requestor is the name server.</span>
+        <span class="k">if</span> <span class="n">payload</span><span class="p">[</span><span class="s2">&quot;role&quot;</span><span class="p">]</span> <span class="o">!=</span> <span class="s2">&quot;name_server&quot;</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Error running consistency check. Requestor is not a name server.&quot;</span><span class="p">)</span>
+            
+            <span class="k">return</span>
+        
+        <span class="c1"># For each file, get its checksum.</span>
+        <span class="k">for</span> <span class="n">file</span> <span class="ow">in</span> <span class="n">files</span><span class="p">:</span>
+            <span class="c1"># Add the storage directory to the file path, so to get its</span>
+            <span class="c1"># absolute path in the local storage.</span>
+            <span class="n">local_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">files_dir</span><span class="p">,</span> <span class="n">file</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+            
+            <span class="c1"># If the file exists, calculate its checksum.</span>
+            <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">local_path</span><span class="p">):</span>
+                <span class="n">checksum</span> <span class="o">=</span> <span class="n">utils</span><span class="o">.</span><span class="n">calculate_checksum</span><span class="p">(</span><span class="n">local_path</span><span class="p">)</span>
+                
+                <span class="c1"># If the file is corrupted, demand database update to the name server.</span>
+                <span class="k">if</span> <span class="n">file</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">!=</span> <span class="n">checksum</span><span class="p">:</span>
+                    <span class="c1"># DEBUG</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;File </span><span class="si">{</span><span class="n">file</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="si">}</span><span class="s2"> is corrupted.&quot;</span><span class="p">)</span>
+                    
+                    <span class="n">result</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">conn</span><span class="o">.</span><span class="n">root</span><span class="o">.</span><span class="n">handle_file_inconsistency</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">token</span><span class="p">,</span> <span class="n">file</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+            
+            <span class="c1"># If the file does not exist, demand database update to the name server.</span>
+            <span class="c1"># This might be the case that a file transfer to the file server failed.</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="c1"># DEBUG</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;File </span><span class="si">{</span><span class="n">file</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="si">}</span><span class="s2"> does not exist.&quot;</span><span class="p">)</span>
+                
+                <span class="n">result</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">conn</span><span class="o">.</span><span class="n">root</span><span class="o">.</span><span class="n">handle_file_inconsistency</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">token</span><span class="p">,</span> <span class="n">file</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+                <span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="p">)</span></div>
+</div>
+
+
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    
+    <span class="c1"># Create the file server.</span>
+    <span class="n">file_server</span> <span class="o">=</span> <span class="n">FileServer</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">argv</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="nb">int</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">argv</span><span class="p">[</span><span class="mi">2</span><span class="p">]))</span>
+    
+    <span class="c1"># Handle keyboard interrupts.</span>
+    <span class="n">signal</span><span class="o">.</span><span class="n">signal</span><span class="p">(</span>
+        <span class="n">signal</span><span class="o">.</span><span class="n">SIGINT</span><span class="p">,</span>
+        <span class="n">partial</span><span class="p">(</span>
+            <span class="n">utils</span><span class="o">.</span><span class="n">handle_keyboard_interrupt_file_server</span><span class="p">,</span>
+            <span class="n">file_server</span><span class="o">=</span><span class="n">file_server</span>
+            <span class="p">)</span>
+        <span class="p">)</span>
+    
+    <span class="c1"># Prompt is displayed until a login is successful.</span>
+    <span class="n">file_server</span><span class="o">.</span><span class="n">main_prompt</span><span class="p">()</span>
+    
+    <span class="c1"># Start the file server.</span>
+    <span class="n">server</span> <span class="o">=</span> <span class="n">ThreadedServer</span><span class="p">(</span>
+        <span class="n">file_server</span><span class="p">,</span>
+        <span class="n">hostname</span>    <span class="o">=</span><span class="n">file_server</span><span class="o">.</span><span class="n">host</span><span class="p">,</span>
+        <span class="n">port</span>        <span class="o">=</span><span class="n">file_server</span><span class="o">.</span><span class="n">port</span>
+        <span class="p">)</span>
+    
+    <span class="c1"># Associate the ThreadedServer to the file server.</span>
+    <span class="n">file_server</span><span class="o">.</span><span class="n">_server</span> <span class="o">=</span> <span class="n">server</span>
+    
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Starting file server...&quot;</span><span class="p">)</span>
+    <span class="n">server</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
+</pre></div>
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">sym-DFS-project</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../index.html">Documentation overview</a><ul>
+  <li><a href="index.html">Module code</a><ul>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2025, Carlo Uguzzoni.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 8.1.3</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+    </div>
+
+    
+
+    
+  </body>
+</html>
