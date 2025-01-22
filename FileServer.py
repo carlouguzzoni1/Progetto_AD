@@ -1,4 +1,5 @@
 from functools import partial
+import json
 import os
 import signal
 import sys
@@ -8,6 +9,14 @@ from getpass import getpass
 import heartbeats
 from apscheduler.schedulers.background import BackgroundScheduler
 import utils
+
+
+
+# Load configuration from file.
+with open('fileserver_config.json', 'r') as file:
+    config = json.load(file)
+
+FS_ROOT_DIR = config['root_dir']
 
 
 
@@ -40,17 +49,17 @@ class FileServer(rpyc.Service):
             ns_port (int):  The port number of the name server.
         """
         
-        self.ns_host        = ns_host   # Host for the name server.
-        self.ns_port        = ns_port   # Port for the name server.
-        self.conn           = None      # Connection to the name server.
-        self.host           = None      # Host for the file server.
-        self.port           = None      # Port for the file server.
-        self.files_dir      = None      # The storage directory of the file server.
-        self.name           = None      # The name of the file server.
-        self.token          = None      # The JWT token of the file server.
-        self.scheduler      = None      # The job scheduler.
-        self._public_key    = None      # Public key for JWT tokens.
-        self._server        = None      # The ThreadedServer instance for the file server.
+        self.ns_host        = ns_host       # Host for the name server.
+        self.ns_port        = ns_port       # Port for the name server.
+        self.conn           = None          # Connection to the name server.
+        self.host           = None          # Host for the file server.
+        self.port           = None          # Port for the file server.
+        self.files_dir      = FS_ROOT_DIR   # The storage directory of the file server.
+        self.name           = None          # The name of the file server.
+        self.token          = None          # The JWT token of the file server.
+        self.scheduler      = None          # The job scheduler.
+        self._public_key    = None          # Public key for JWT tokens.
+        self._server        = None          # The ThreadedServer instance for the file server.
     
     
     def __del__(self):
@@ -147,9 +156,6 @@ class FileServer(rpyc.Service):
                     print("Unknown command.")
     
     
-    # REVISIONE CODICE OK FINO QUA <-----
-    
-    
     def register(self):
         """Registers a new file server."""
         
@@ -160,8 +166,22 @@ class FileServer(rpyc.Service):
         port        = input("Insert server's port: ")
         size        = input("Insert server's size (in bytes): ")
         
+        # Check if host is localhost or a valid IP address.
+        if not utils.is_valid_host(host):
+            print("Invalid host. Must be localhost or a valid IP address.")
+            
+            return
+        
+        # Check if port is a positive integer between 1 and 65535.
+        if not 1 <= int(port) <= 65535:
+            print("Invalid port. Must be between 1 and 65535.")
+            
+            return
+        
+        # Check if the size is a positive integer.
         if int(size) < 0:
             print("Invalid size. Must be a positive integer.")
+            
             return
         
         result      = self.conn.root.create_file_server(name, password, host, port, size)
@@ -173,6 +193,7 @@ class FileServer(rpyc.Service):
         """Logs in as an existing file server."""
         
         print("Logging in...")
+        
         name        = input("Insert server's name: ")
         password    = getpass("Insert password: ")
         
@@ -181,7 +202,7 @@ class FileServer(rpyc.Service):
         if result["status"]:
             self.host           = result["host"]
             self.port           = result["port"]
-            self.files_dir      = "./FS/{}".format(name)
+            self.files_dir      = os.path.join(self.files_dir, name)
             self.name           = name
             self.token          = result["token"]
             self._public_key    = result["public_key"]
@@ -227,10 +248,22 @@ class FileServer(rpyc.Service):
         print(f"Storing file '{file_path}'...")
         
         # Verify the token.
-        payload = utils.get_token_payload(self.token, self._public_key)
+        payload = utils.get_token_payload(token, self._public_key)
         
         if payload is None:
-            return {"status": False, "message": "Error storing file. Corrupted token."}
+            return {
+                "status":   False,
+                "message":  "Error storing file. Corrupted token."
+                }
+        else:
+            username = payload["username"]
+        
+        # Check whether the requestor is the owner of the file.
+        if os.path.dirname(file_path).split("/")[0] != username:
+            return {
+                "status":   False,
+                "message":  "Error storing file. Requestor is not owner."
+                }
         
         # Get the base directory in the file server storage.
         dir         = self.files_dir
@@ -256,12 +289,18 @@ class FileServer(rpyc.Service):
             with open(file_path, "wb") as file:
                 file.write(file_data)
             
-            return {"status": True, "message": "File stored successfully."}
+            return {
+                "status":   True,
+                "message":  "File stored successfully."
+                }
         
         except Exception as e:
             print(f"Error storing file '{file_name}': {e}")
             
-            return {"status": False, "message": "Error storing file."}
+            return {
+                "status":   False,
+                "message":  "Error storing file."
+                }
     
     
     def exposed_send_file(self, file_path, token):
@@ -278,10 +317,13 @@ class FileServer(rpyc.Service):
         print(f"Sending file '{file_path}'...")
         
         # Get the username from the token.
-        payload = utils.get_token_payload(self.token, self._public_key)
+        payload = utils.get_token_payload(token, self._public_key)
         
         if payload is None:
-            return {"status": False, "message": "Error sending file. Corrupted token."}
+            return {
+                "status":   False,
+                "message":  "Error sending file. Corrupted token."
+                }
         else:
             username = payload["username"]
         
@@ -289,8 +331,8 @@ class FileServer(rpyc.Service):
         # username must be the same as the higher directory in the file path.
         if os.path.dirname(file_path).split("/")[0] != username:
             return {
-                "status": False,
-                "message": "User does not own the file. Access denied."
+                "status":   False,
+                "message":  "User does not own the file. Access denied."
                 }
         
         # Combine the root directory with the file path to get the absolute file path.
@@ -298,16 +340,19 @@ class FileServer(rpyc.Service):
         
         # Check if the file exists.
         if not os.path.exists(file_path):
-            return {"status": False, "message": "File not found."}
+            return {
+                "status":   False,
+                "message":  "File not found."
+                }
         
         # Read the file data.
         with open(file_path, "rb") as file:
             file_data = file.read()
             
             return {
-                "status": True,
-                "file_data": file_data,
-                "message": "File received successfully."
+                "status":       True,
+                "file_data":    file_data,
+                "message":      "File received successfully."
                 }
     
     
@@ -345,7 +390,12 @@ class FileServer(rpyc.Service):
             print(f"Sending replica to file server {server[0]}...")
             
             # Connect to the file server. server is a list of tuples.
-            fs_conn         = rpyc.connect(server[1], server[2])
+            try:
+                fs_conn         = rpyc.connect(server[1], server[2])
+                
+            except Exception as e:
+                print(f"Error connecting to file server {server[0]}: {e}")
+                continue
             
             # Add the base directory to the file path.
             abs_file_path   = os.path.join(self.files_dir, file_path)
@@ -356,6 +406,11 @@ class FileServer(rpyc.Service):
                 result      = fs_conn.root.store_file(file_path, file_data, self.token)
                 
                 print(result["message"])
+            
+            fs_conn.close()
+    
+    
+    # Revisione ok fino qua <-----
     
     
     def exposed_garbage_collection(self, token, db_files):

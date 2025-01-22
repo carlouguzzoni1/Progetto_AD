@@ -5,16 +5,24 @@ from tabulate import tabulate
 import utils
 from getpass import getpass
 from apscheduler.schedulers.background import BackgroundScheduler
+import json
 
 
 
-# TODO: spostare in variabili d'ambiente/file di configurazione.
-CLIENT_ROOT_DIR = "./CLI"
+# Load configuration from file.
+with open('client_config.json', 'r') as file:
+    config = json.load(file)
+
+CLIENT_ROOT_DIR = config['root_dir']
 
 
 
 class BaseClient(ABC):
     """Abstract base class for client classes."""
+    
+    
+    ##### DUNDER METHODS #####
+    
     
     def __init__(self, host, port):
         """
@@ -44,6 +52,9 @@ class BaseClient(ABC):
         # Close the connection.
         print("Closing the connection to the name server...")
         self.conn.close()
+    
+    
+    ##### PRIVATE METHODS #####
     
     
     def _cleanup(self):

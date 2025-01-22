@@ -8,10 +8,15 @@ import utils
 from tabulate import tabulate
 from apscheduler.schedulers.background import BackgroundScheduler
 import heartbeats
+import json
 
 
-# TODO: spostare in file di configurazione/variabile d'ambiente.
-LOCKFILE_PATH = "./NS/rootclient.lock"
+
+# Load configuration from file.
+with open('root_client_config.json', 'r') as file:
+    config = json.load(file)
+
+LOCKFILE_PATH = config['lockfile_path']
 
 
 
@@ -33,6 +38,9 @@ class RootClient(BaseClient):
     
     _instance   = None          # RootClient active instance.
     _lock_file  = LOCKFILE_PATH # File used to lock the root client.
+    
+    
+    ##### DUNDER METHODS #####
     
     
     def __new__(cls, *args, **kwargs):

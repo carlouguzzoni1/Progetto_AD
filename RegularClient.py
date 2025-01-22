@@ -22,6 +22,10 @@ class RegularClient(BaseClient):
     #       Le funzionalità sono pertanto quelle di base, definite nella classe
     #       BaseClient, più i metodi che consenstono l'interazione con l'utente.
     
+    
+    ##### DUNDER METHODS #####
+    
+    
     def __init__(self, host, port):
         """
         Initializes the client.

@@ -1,5 +1,6 @@
 import datetime
 import hashlib
+import socket
 import sys
 import jwt
 
@@ -131,3 +132,37 @@ def current_timestamp():
     """
     
     return datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+
+
+def is_valid_host(host):
+    """
+    Verifies that a host is localhost or a valid IP address.
+    Args:
+        host (str): The host to verify.
+    Returns:
+        bool: True if the host is localhost or a valid IP address, False otherwise.
+    """
+    
+    # Chech whether the host is localhost (127.0.0.1).
+    if host == "localhost" or host == "127.0.0.1":
+        return True
+    
+    # Check host validity as IPv4 address.
+    try:
+        socket.inet_aton(host)
+        
+        return True
+    
+    except socket.error:
+        pass
+    
+    # Check host validity as IPv6 address.
+    try:
+        socket.inet_pton(socket.AF_INET6, host)
+        
+        return True
+    
+    except socket.error:
+        pass
+    
+    return False
