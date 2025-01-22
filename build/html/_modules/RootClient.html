@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RootClient &#8212; sym-DFS-project 1.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=d1102ebc" />
+    <link rel="stylesheet" type="text/css" href="../_static/basic.css?v=686e5160" />
+    <link rel="stylesheet" type="text/css" href="../_static/alabaster.css?v=27fed22d" />
+    <link rel="stylesheet" type="text/css" href="../_static/graphviz.css?v=4ae1632d" />
+    <script src="../_static/documentation_options.js?v=f2a433a1"></script>
+    <script src="../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <h1>Source code for RootClient</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span> <span class="nn">functools</span> <span class="kn">import</span> <span class="n">partial</span>
+<span class="kn">import</span> <span class="nn">signal</span>
+<span class="kn">import</span> <span class="nn">sys</span>
+<span class="kn">from</span> <span class="nn">BaseClient</span> <span class="kn">import</span> <span class="n">BaseClient</span>
+<span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">from</span> <span class="nn">getpass</span> <span class="kn">import</span> <span class="n">getpass</span>
+<span class="kn">import</span> <span class="nn">utils</span>
+<span class="kn">from</span> <span class="nn">tabulate</span> <span class="kn">import</span> <span class="n">tabulate</span>
+<span class="kn">from</span> <span class="nn">apscheduler.schedulers.background</span> <span class="kn">import</span> <span class="n">BackgroundScheduler</span>
+<span class="kn">import</span> <span class="nn">heartbeats</span>
+<span class="kn">import</span> <span class="nn">json</span>
+
+
+
+<span class="c1"># Load configuration from file.</span>
+<span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="s1">&#39;root_client_config.json&#39;</span><span class="p">,</span> <span class="s1">&#39;r&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">file</span><span class="p">:</span>
+    <span class="n">config</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">file</span><span class="p">)</span>
+
+<span class="n">LOCKFILE_PATH</span> <span class="o">=</span> <span class="n">config</span><span class="p">[</span><span class="s1">&#39;lockfile_path&#39;</span><span class="p">]</span>
+
+
+
+<div class="viewcode-block" id="RootClient">
+<a class="viewcode-back" href="../RootClient.html#RootClient.RootClient">[docs]</a>
+<span class="k">class</span> <span class="nc">RootClient</span><span class="p">(</span><span class="n">BaseClient</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Client class for root user. Root client is a singleton.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    
+    <span class="c1"># IMPROVE: si potrebbe consentire al root client di cancellare files od utenti,</span>
+    <span class="c1">#          in modo forzato, qualora essi violassero le policy dell&#39;amministratore.</span>
+    <span class="c1">#          In tal caso, si dovrebbe però iscrivere il tutto in un file di log.</span>
+    
+    <span class="c1"># NOTE: il RootClient è pensato come un utente con privilegi speciali, che</span>
+    <span class="c1">#       interagisce con le altre entità in caso di manutenzione del sistema.</span>
+    <span class="c1">#       Non gli è consentito di applicare le funzioni di base al di fuori</span>
+    <span class="c1">#       dello scopo per il quale sono state definite, per motivi di privacy.</span>
+    
+    <span class="c1"># NOTE: la procedura di locking può essere implementata utilizzando una</span>
+    <span class="c1">#       risorsa comune, accessibile da tutti i client tramite URL. In questo</span>
+    <span class="c1">#       modo si supera il confine dello host locale.</span>
+    
+    <span class="n">_instance</span>   <span class="o">=</span> <span class="kc">None</span>          <span class="c1"># RootClient active instance.</span>
+    <span class="n">_lock_file</span>  <span class="o">=</span> <span class="n">LOCKFILE_PATH</span> <span class="c1"># File used to lock the root client.</span>
+    
+    
+    <span class="c1">##### DUNDER METHODS #####</span>
+    
+    
+    <span class="k">def</span> <span class="fm">__new__</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Creates a new root client.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        
+        <span class="k">if</span> <span class="bp">cls</span><span class="o">.</span><span class="n">_instance</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="c1"># Check if root client is already running.</span>
+            <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="bp">cls</span><span class="o">.</span><span class="n">_lock_file</span><span class="p">):</span>
+                <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;Error: root client already running!&quot;</span><span class="p">)</span>
+            
+            <span class="c1"># Create a new root client.</span>
+            <span class="bp">cls</span><span class="o">.</span><span class="n">_instance</span> <span class="o">=</span> <span class="nb">super</span><span class="p">(</span><span class="n">RootClient</span><span class="p">,</span> <span class="bp">cls</span><span class="p">)</span><span class="o">.</span><span class="fm">__new__</span><span class="p">(</span><span class="bp">cls</span><span class="p">)</span>
+            
+            <span class="c1"># Lock the root client.</span>
+            <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="bp">cls</span><span class="o">.</span><span class="n">_lock_file</span><span class="p">,</span> <span class="s2">&quot;w&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">lock</span><span class="p">:</span>
+                <span class="n">lock</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;locked&quot;</span><span class="p">)</span>
+        
+        <span class="k">return</span> <span class="bp">cls</span><span class="o">.</span><span class="n">_instance</span>
+    
+    
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">host</span><span class="p">,</span> <span class="n">port</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Initializes the root client.</span>
+<span class="sd">        </span>
+<span class="sd">        Args:</span>
+<span class="sd">            host (str): The hostname or IP address of the name server.</span>
+<span class="sd">            port (int): The port number of the name server.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">host</span><span class="p">,</span> <span class="n">port</span><span class="p">)</span>
+    
+    
+    <span class="k">def</span> <span class="fm">__del__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Removes the lock file when the root client is deleted.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        
+        <span class="c1"># Call the destructor of the parent class.</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__del__</span><span class="p">()</span>
+        
+        <span class="c1"># Remove the lock file.</span>
+        <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_lock_file</span><span class="p">):</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Removing lock file...&quot;</span><span class="p">)</span>
+            <span class="n">os</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_lock_file</span><span class="p">)</span>
+    
+    
+    <span class="c1">##### ABSTRACT METHODS IMPLEMENTATION #####</span>
+    
+    
+<div class="viewcode-block" id="RootClient.display_commands">
+<a class="viewcode-back" href="../RootClient.html#RootClient.RootClient.display_commands">[docs]</a>
+    <span class="k">def</span> <span class="nf">display_commands</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Displays the available commands for the root client.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">        Welcome to sym-DFS Project Root Client.</span>
+<span class="s2">        Commands:</span>
+<span class="s2">        create-user         Create a new user</span>
+<span class="s2">        delete-user         Delete a user</span>
+<span class="s2">        list-files          List files of the root user</span>
+<span class="s2">        upload              Upload a file</span>
+<span class="s2">        download            Download a file</span>
+<span class="s2">        delete-file         Delete a file</span>
+<span class="s2">        list-all-files      List all files in the DFS</span>
+<span class="s2">        list-all-clients    List all clients in the DFS</span>
+<span class="s2">        list-all-fs         List all file servers in the DFS</span>
+<span class="s2">        exit                Exit the program</span>
+<span class="s2">        show-commands       Show commands</span>
+<span class="s2">        &quot;&quot;&quot;</span><span class="p">)</span></div>
+
+    
+    
+<div class="viewcode-block" id="RootClient.main_prompt">
+<a class="viewcode-back" href="../RootClient.html#RootClient.RootClient.main_prompt">[docs]</a>
+    <span class="k">def</span> <span class="nf">main_prompt</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Displays the main prompt for the root client.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        
+        <span class="bp">self</span><span class="o">.</span><span class="n">display_commands</span><span class="p">()</span> <span class="c1"># Display the available commands.</span>
+        
+        <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+            <span class="c1"># Get user input.</span>
+            <span class="n">command</span> <span class="o">=</span> <span class="nb">input</span><span class="p">(</span>
+                <span class="s2">&quot;(</span><span class="si">{}</span><span class="s2">)&gt; &quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">logged_username</span><span class="p">)</span>
+            <span class="p">)</span>
+            
+            <span class="c1"># Execute the command.</span>
+            <span class="k">match</span> <span class="n">command</span><span class="p">:</span>
+                <span class="k">case</span> <span class="s2">&quot;create-user&quot;</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">create_user</span><span class="p">()</span>
+                <span class="k">case</span> <span class="s2">&quot;delete-user&quot;</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">delete_user</span><span class="p">()</span>
+                <span class="k">case</span> <span class="s2">&quot;list-files&quot;</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">list_files</span><span class="p">()</span>
+                <span class="k">case</span> <span class="s2">&quot;upload&quot;</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">upload</span><span class="p">()</span>
+                <span class="k">case</span> <span class="s2">&quot;download&quot;</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">download</span><span class="p">()</span>
+                <span class="k">case</span> <span class="s2">&quot;delete-file&quot;</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">delete</span><span class="p">()</span>
+                <span class="k">case</span> <span class="s2">&quot;list-all-files&quot;</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">list_all_files</span><span class="p">()</span>
+                <span class="k">case</span> <span class="s2">&quot;list-all-clients&quot;</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">list_all_clients</span><span class="p">()</span>
+                <span class="k">case</span> <span class="s2">&quot;list-all-fs&quot;</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">list_all_file_servers</span><span class="p">()</span>
+                <span class="k">case</span> <span class="s2">&quot;exit&quot;</span><span class="p">:</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Exiting...&quot;</span><span class="p">)</span>
+                    <span class="c1"># Update the user status in the name server&#39;s database.</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_cleanup</span><span class="p">()</span> <span class="c1"># Log out before exiting.</span>
+                    <span class="c1"># Connection is closed upon deletion, which happens on exit.</span>
+                    <span class="k">break</span>
+                <span class="k">case</span> <span class="s2">&quot;show-commands&quot;</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">display_commands</span><span class="p">()</span>
+                <span class="k">case</span><span class="w"> </span><span class="k">_</span><span class="p">:</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Unknown command. Type &#39;show-commands&#39; for a list of commands.&quot;</span><span class="p">)</span></div>
+
+    
+    
+    <span class="c1">##### USER INTERACTION METHODS #####</span>
+    
+    
+<div class="viewcode-block" id="RootClient.login_as_root">
+<a class="viewcode-back" href="../RootClient.html#RootClient.RootClient.login_as_root">[docs]</a>
+    <span class="k">def</span> <span class="nf">login_as_root</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Authenticates the root user.</span>
+<span class="sd">        This procedure is different from the login procedure for regular users,</span>
+<span class="sd">        as it is mandatory and launched at the start of the program.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        
+        <span class="c1"># NOTE: la procedura di creazione di un client root utilizza lo stesso metodo</span>
+        <span class="c1">#       esposto dal file server per la creazione di un client regolare. In</span>
+        <span class="c1">#       ogni caso, per la creazione di un utente root è richiesta una certa</span>
+        <span class="c1">#       passphrase, definita solo lato-server e non direttamente accessibile</span>
+        <span class="c1">#       dai client regolari.</span>
+        
+        <span class="bp">self</span><span class="o">.</span><span class="n">connect</span><span class="p">()</span>  <span class="c1"># Connect to the name server.</span>
+        
+        <span class="c1"># Check if the name server has a root user.</span>
+        <span class="k">while</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">conn</span><span class="o">.</span><span class="n">root</span><span class="o">.</span><span class="n">exists_root_user</span><span class="p">():</span>
+            <span class="c1"># If not, create one.</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;No root user was found. Creating one...&quot;</span><span class="p">)</span>
+            
+            <span class="c1"># Get username, password and root passphrase from the user.</span>
+            <span class="n">username</span>        <span class="o">=</span> <span class="nb">input</span><span class="p">(</span><span class="s2">&quot;Insert username: &quot;</span><span class="p">)</span>
+            <span class="n">password</span>        <span class="o">=</span> <span class="n">getpass</span><span class="p">(</span><span class="s2">&quot;Insert password: &quot;</span><span class="p">)</span>
+            <span class="n">root_passphrase</span> <span class="o">=</span> <span class="n">getpass</span><span class="p">(</span><span class="s2">&quot;Insert root passphrase: &quot;</span><span class="p">)</span>
+            
+            <span class="c1"># Try to create the root user.</span>
+            <span class="n">result</span>  <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">conn</span><span class="o">.</span><span class="n">root</span><span class="o">.</span><span class="n">create_user</span><span class="p">(</span>
+                <span class="n">username</span><span class="p">,</span>
+                <span class="n">password</span><span class="p">,</span>
+                <span class="kc">True</span><span class="p">,</span>
+                <span class="n">root_passphrase</span>
+                <span class="p">)</span>
+            
+            <span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="p">[</span><span class="s2">&quot;message&quot;</span><span class="p">])</span>
+        
+        <span class="c1"># Login as root.</span>
+        <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Login as root...&quot;</span><span class="p">)</span>
+            
+            <span class="c1"># Get username and password from the user.</span>
+            <span class="n">username</span> <span class="o">=</span> <span class="nb">input</span><span class="p">(</span><span class="s2">&quot;Insert username: &quot;</span><span class="p">)</span>
+            <span class="n">password</span> <span class="o">=</span> <span class="n">getpass</span><span class="p">(</span><span class="s2">&quot;Insert password: &quot;</span><span class="p">)</span>
+            
+            <span class="c1"># Authenticate the root user.</span>
+            <span class="n">result</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">conn</span><span class="o">.</span><span class="n">root</span><span class="o">.</span><span class="n">authenticate_user</span><span class="p">(</span><span class="n">username</span><span class="p">,</span> <span class="n">password</span><span class="p">)</span>
+            
+            <span class="c1"># Check whether the authentication was successful.</span>
+            <span class="k">if</span> <span class="n">result</span><span class="p">[</span><span class="s2">&quot;status&quot;</span><span class="p">]:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">user_is_logged</span>     <span class="o">=</span> <span class="kc">True</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">logged_username</span>    <span class="o">=</span> <span class="n">username</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">files_dir</span>          <span class="o">=</span> <span class="s2">&quot;./CLI/</span><span class="si">{}</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">username</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">token</span>              <span class="o">=</span> <span class="n">result</span><span class="p">[</span><span class="s2">&quot;token&quot;</span><span class="p">]</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">scheduler</span>          <span class="o">=</span> <span class="n">BackgroundScheduler</span><span class="p">()</span>
+                
+                <span class="c1"># Add activity heartbeat job.</span>
+                <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Starting periodic activity heartbeat job...&quot;</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">scheduler</span><span class="o">.</span><span class="n">add_job</span><span class="p">(</span>
+                    <span class="n">heartbeats</span><span class="o">.</span><span class="n">send_activity_heartbeat</span><span class="p">,</span>
+                    <span class="n">args</span><span class="o">=</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">conn</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">token</span><span class="p">],</span>
+                    <span class="n">trigger</span><span class="o">=</span><span class="s1">&#39;interval&#39;</span><span class="p">,</span>
+                    <span class="n">seconds</span><span class="o">=</span><span class="mi">30</span><span class="p">,</span>
+                    <span class="nb">id</span><span class="o">=</span><span class="s2">&quot;activity_heartbeat&quot;</span>
+                    <span class="p">)</span>
+                
+                <span class="c1"># Start the scheduler.</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">scheduler</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
+                
+                <span class="c1"># Check whether the root client actually has a local files directory.</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">files_dir</span><span class="p">):</span>
+                    <span class="n">os</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">files_dir</span><span class="p">)</span>   <span class="c1"># Create the directory.</span>
+                
+                <span class="k">break</span>
+            
+            <span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="p">[</span><span class="s2">&quot;message&quot;</span><span class="p">])</span></div>
+
+    
+    
+    <span class="c1">##### ROOT ONLY COMMANDS #####</span>
+    
+    
+<div class="viewcode-block" id="RootClient.list_all_files">
+<a class="viewcode-back" href="../RootClient.html#RootClient.RootClient.list_all_files">[docs]</a>
+    <span class="k">def</span> <span class="nf">list_all_files</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Lists all files in the DFS.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        
+        <span class="n">result</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">conn</span><span class="o">.</span><span class="n">root</span><span class="o">.</span><span class="n">list_all_files</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">token</span><span class="p">)</span>
+        
+        <span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="p">[</span><span class="s2">&quot;message&quot;</span><span class="p">])</span>
+        
+        <span class="c1"># If the operation was successful, print the files.</span>
+        <span class="k">if</span> <span class="n">result</span><span class="p">[</span><span class="s2">&quot;status&quot;</span><span class="p">]:</span>
+            <span class="c1"># Convert the result to a list of dictionaries.</span>
+            <span class="n">headers</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;File&quot;</span><span class="p">,</span> <span class="s2">&quot;Size&quot;</span><span class="p">,</span> <span class="s2">&quot;Owner&quot;</span><span class="p">,</span> <span class="s2">&quot;Checksum&quot;</span><span class="p">,</span> <span class="s2">&quot;Is corrupted&quot;</span><span class="p">,</span> <span class="s2">&quot;Uploaded at&quot;</span><span class="p">,</span> <span class="s2">&quot;Server&quot;</span><span class="p">]</span>
+            <span class="n">result</span><span class="p">[</span><span class="s2">&quot;files&quot;</span><span class="p">]</span>  <span class="o">=</span> <span class="p">[</span><span class="nb">dict</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">headers</span><span class="p">,</span> <span class="n">row</span><span class="p">))</span> <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">result</span><span class="p">[</span><span class="s2">&quot;files&quot;</span><span class="p">]]</span>
+            
+            <span class="n">MAX_CHECKSUM_LEN</span> <span class="o">=</span> <span class="mi">15</span>
+            
+            <span class="n">result</span><span class="p">[</span><span class="s2">&quot;files&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span>
+                <span class="p">{</span>
+                    <span class="s2">&quot;File&quot;</span>          <span class="p">:</span> <span class="n">f</span><span class="p">[</span><span class="s2">&quot;File&quot;</span><span class="p">],</span>
+                    <span class="s2">&quot;Size&quot;</span>          <span class="p">:</span> <span class="n">f</span><span class="p">[</span><span class="s2">&quot;Size&quot;</span><span class="p">],</span>
+                    <span class="s2">&quot;Owner&quot;</span>         <span class="p">:</span> <span class="n">f</span><span class="p">[</span><span class="s2">&quot;Owner&quot;</span><span class="p">],</span>
+                    <span class="s2">&quot;Checksum&quot;</span>      <span class="p">:</span> <span class="n">utils</span><span class="o">.</span><span class="n">truncate</span><span class="p">(</span><span class="n">f</span><span class="p">[</span><span class="s2">&quot;Checksum&quot;</span><span class="p">],</span> <span class="n">MAX_CHECKSUM_LEN</span><span class="p">),</span>
+                    <span class="s2">&quot;Is corrupted&quot;</span>  <span class="p">:</span> <span class="s2">&quot;Y&quot;</span> <span class="k">if</span> <span class="n">f</span><span class="p">[</span><span class="s2">&quot;Is corrupted&quot;</span><span class="p">]</span> <span class="k">else</span> <span class="s2">&quot;N&quot;</span><span class="p">,</span>
+                    <span class="s2">&quot;Uploaded at&quot;</span>   <span class="p">:</span> <span class="n">f</span><span class="p">[</span><span class="s2">&quot;Uploaded at&quot;</span><span class="p">],</span>
+                    <span class="s2">&quot;Server&quot;</span>        <span class="p">:</span> <span class="n">f</span><span class="p">[</span><span class="s2">&quot;Server&quot;</span><span class="p">]</span>
+                <span class="p">}</span>
+                <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">result</span><span class="p">[</span><span class="s2">&quot;files&quot;</span><span class="p">]</span>
+            <span class="p">]</span>
+            
+            <span class="nb">print</span><span class="p">(</span><span class="n">tabulate</span><span class="p">(</span><span class="n">result</span><span class="p">[</span><span class="s2">&quot;files&quot;</span><span class="p">],</span> <span class="n">headers</span><span class="o">=</span><span class="s2">&quot;keys&quot;</span><span class="p">))</span></div>
+
+    
+    
+<div class="viewcode-block" id="RootClient.list_all_clients">
+<a class="viewcode-back" href="../RootClient.html#RootClient.RootClient.list_all_clients">[docs]</a>
+    <span class="k">def</span> <span class="nf">list_all_clients</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Lists all clients in the DFS.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        
+        <span class="n">result</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">conn</span><span class="o">.</span><span class="n">root</span><span class="o">.</span><span class="n">list_all_clients</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">token</span><span class="p">)</span>
+        
+        <span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="p">[</span><span class="s2">&quot;message&quot;</span><span class="p">])</span>
+        
+        <span class="c1"># If the operation was successful, print the clients.</span>
+        <span class="k">if</span> <span class="n">result</span><span class="p">[</span><span class="s2">&quot;status&quot;</span><span class="p">]:</span>
+            <span class="n">headers</span>             <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;Username&quot;</span><span class="p">,</span> <span class="s2">&quot;Is online&quot;</span><span class="p">]</span>
+            <span class="n">result</span><span class="p">[</span><span class="s2">&quot;clients&quot;</span><span class="p">]</span>   <span class="o">=</span> <span class="p">[</span><span class="nb">dict</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">headers</span><span class="p">,</span> <span class="n">row</span><span class="p">))</span> <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">result</span><span class="p">[</span><span class="s2">&quot;clients&quot;</span><span class="p">]]</span>
+            
+            <span class="c1"># Replace the boolean values with &quot;Y&quot; or &quot;N&quot;.</span>
+            <span class="n">result</span><span class="p">[</span><span class="s2">&quot;clients&quot;</span><span class="p">]</span>   <span class="o">=</span> <span class="p">[</span>
+                <span class="p">{</span>
+                    <span class="s2">&quot;Username&quot;</span>   <span class="p">:</span> <span class="n">c</span><span class="p">[</span><span class="s2">&quot;Username&quot;</span><span class="p">],</span>
+                    <span class="s2">&quot;Is online&quot;</span>  <span class="p">:</span> <span class="s2">&quot;Y&quot;</span> <span class="k">if</span> <span class="n">c</span><span class="p">[</span><span class="s2">&quot;Is online&quot;</span><span class="p">]</span> <span class="k">else</span> <span class="s2">&quot;N&quot;</span>
+                <span class="p">}</span>
+                <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">result</span><span class="p">[</span><span class="s2">&quot;clients&quot;</span><span class="p">]</span>
+            <span class="p">]</span>
+            
+            <span class="nb">print</span><span class="p">(</span><span class="n">tabulate</span><span class="p">(</span><span class="n">result</span><span class="p">[</span><span class="s2">&quot;clients&quot;</span><span class="p">],</span> <span class="n">headers</span><span class="o">=</span><span class="s2">&quot;keys&quot;</span><span class="p">))</span></div>
+
+    
+    
+<div class="viewcode-block" id="RootClient.list_all_file_servers">
+<a class="viewcode-back" href="../RootClient.html#RootClient.RootClient.list_all_file_servers">[docs]</a>
+    <span class="k">def</span> <span class="nf">list_all_file_servers</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Lists all file servers in the DFS.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        
+        <span class="n">result</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">conn</span><span class="o">.</span><span class="n">root</span><span class="o">.</span><span class="n">list_all_file_servers</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">token</span><span class="p">)</span>
+        
+        <span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="p">[</span><span class="s2">&quot;message&quot;</span><span class="p">])</span>
+        
+        <span class="c1"># If the operation was successful, print the file servers.</span>
+        <span class="k">if</span> <span class="n">result</span><span class="p">[</span><span class="s2">&quot;status&quot;</span><span class="p">]:</span>
+            <span class="n">headers</span>                 <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;Name&quot;</span><span class="p">,</span> <span class="s2">&quot;Is online&quot;</span><span class="p">,</span> <span class="s2">&quot;Address&quot;</span><span class="p">,</span> <span class="s2">&quot;Port&quot;</span><span class="p">,</span> <span class="s2">&quot;Size&quot;</span><span class="p">,</span> <span class="s2">&quot;Free space&quot;</span><span class="p">]</span>
+            <span class="n">result</span><span class="p">[</span><span class="s2">&quot;file_servers&quot;</span><span class="p">]</span>  <span class="o">=</span> <span class="p">[</span><span class="nb">dict</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">headers</span><span class="p">,</span> <span class="n">row</span><span class="p">))</span> <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">result</span><span class="p">[</span><span class="s2">&quot;file_servers&quot;</span><span class="p">]]</span>
+            
+            <span class="c1"># Replace the boolean values with &quot;Y&quot; or &quot;N&quot;.</span>
+            <span class="n">result</span><span class="p">[</span><span class="s2">&quot;file_servers&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span>
+                <span class="p">{</span>
+                    <span class="s2">&quot;Name&quot;</span>          <span class="p">:</span> <span class="n">f</span><span class="p">[</span><span class="s2">&quot;Name&quot;</span><span class="p">],</span>
+                    <span class="s2">&quot;Is online&quot;</span>     <span class="p">:</span> <span class="s2">&quot;Y&quot;</span> <span class="k">if</span> <span class="n">f</span><span class="p">[</span><span class="s2">&quot;Is online&quot;</span><span class="p">]</span> <span class="k">else</span> <span class="s2">&quot;N&quot;</span><span class="p">,</span>
+                    <span class="s2">&quot;Address&quot;</span>       <span class="p">:</span> <span class="n">f</span><span class="p">[</span><span class="s2">&quot;Address&quot;</span><span class="p">],</span>
+                    <span class="s2">&quot;Port&quot;</span>          <span class="p">:</span> <span class="n">f</span><span class="p">[</span><span class="s2">&quot;Port&quot;</span><span class="p">],</span>
+                    <span class="s2">&quot;Size&quot;</span>          <span class="p">:</span> <span class="n">f</span><span class="p">[</span><span class="s2">&quot;Size&quot;</span><span class="p">],</span>
+                    <span class="s2">&quot;Free space&quot;</span>    <span class="p">:</span> <span class="n">f</span><span class="p">[</span><span class="s2">&quot;Free space&quot;</span><span class="p">]</span>
+                <span class="p">}</span>
+                <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">result</span><span class="p">[</span><span class="s2">&quot;file_servers&quot;</span><span class="p">]</span>
+            <span class="p">]</span>
+            
+            <span class="nb">print</span><span class="p">(</span><span class="n">tabulate</span><span class="p">(</span><span class="n">result</span><span class="p">[</span><span class="s2">&quot;file_servers&quot;</span><span class="p">],</span> <span class="n">headers</span><span class="o">=</span><span class="s2">&quot;keys&quot;</span><span class="p">))</span></div>
+</div>
+
+
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="c1"># Create the root client.</span>
+    <span class="n">root_client</span> <span class="o">=</span> <span class="n">RootClient</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">argv</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="nb">int</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">argv</span><span class="p">[</span><span class="mi">2</span><span class="p">]))</span>
+    
+    <span class="c1"># Handle keyboard interrupts.</span>
+    <span class="n">signal</span><span class="o">.</span><span class="n">signal</span><span class="p">(</span><span class="n">signal</span><span class="o">.</span><span class="n">SIGINT</span><span class="p">,</span> <span class="n">partial</span><span class="p">(</span><span class="n">utils</span><span class="o">.</span><span class="n">handle_keyboard_interrupt_client</span><span class="p">,</span> <span class="n">client</span><span class="o">=</span><span class="n">root_client</span><span class="p">))</span>
+    
+    <span class="n">root_client</span><span class="o">.</span><span class="n">login_as_root</span><span class="p">()</span> <span class="c1"># Mandatory login procedure for root users.</span>
+    <span class="n">root_client</span><span class="o">.</span><span class="n">main_prompt</span><span class="p">()</span>   <span class="c1"># Prompt is displayed until user manually exits.</span>
+</pre></div>
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">sym-DFS-project</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../index.html">Documentation overview</a><ul>
+  <li><a href="index.html">Module code</a><ul>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2025, Carlo Uguzzoni.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 8.1.3</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+    </div>
+
+    
+
+    
+  </body>
+</html>

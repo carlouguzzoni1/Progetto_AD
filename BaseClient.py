@@ -127,6 +127,7 @@ class BaseClient(ABC):
     def create_user(self):
         """
         Creates a new regular user.
+        
         Returns:
             bool: True if the user was created successfully, False otherwise.
         """
@@ -138,7 +139,9 @@ class BaseClient(ABC):
     
     
     def delete_user(self):
-        """Deletes a regular user."""
+        """
+        Deletes a regular user.
+        """
         
         # NOTE: la cancellazione di un utente, per ora, avviene solo nel database del
         #       name server. Si suppone che l'utente che ne cancella un altro sia di
@@ -163,7 +166,9 @@ class BaseClient(ABC):
     
     
     def list_files(self):
-        """Lists the user's files in the DFS."""
+        """
+        Lists the user's files in the DFS.
+        """
         
         if not self.user_is_logged:
             print("You must be logged in to list files.")
@@ -195,6 +200,7 @@ class BaseClient(ABC):
     def upload_file(self, client_path, server_path):
         """
         Uploads a file into the DFS.
+        
         Args:
             client_path (str): The absolute path of the file to upload.
             server_path (str): The directory where the file will be stored.
@@ -247,7 +253,9 @@ class BaseClient(ABC):
     
     
     def upload(self):
-        """User interface for uploading a file."""
+        """
+        User interface for uploading a file.
+        """
         
         if not self.user_is_logged:
             print("You must be logged in to upload a file.")
@@ -267,6 +275,7 @@ class BaseClient(ABC):
     def download_file(self, server_path):
         """
         Downloads a file from the DFS.
+        
         Args:
             server_path (str): The absolute path of the file to download on the DFS.
         """
@@ -315,7 +324,9 @@ class BaseClient(ABC):
     
     
     def download(self):
-        """User interface for downloading a file."""
+        """
+        User interface for downloading a file.
+        """
         
         if not self.user_is_logged:
             print("You must be logged in to download a file.")
@@ -328,6 +339,7 @@ class BaseClient(ABC):
     def delete_file(self, server_path):
         """
         Deletes a file from the DFS.
+        
         Args:
             server_path (str): The absolute path of the file to delete.
         """
@@ -338,7 +350,9 @@ class BaseClient(ABC):
     
     
     def delete(self):
-        """User interface for deleting a file."""
+        """
+        User interface for deleting a file.
+        """
         
         if not self.user_is_logged:
             print("You must be logged in to delete a file.")

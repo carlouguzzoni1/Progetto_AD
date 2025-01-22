@@ -1,0 +1,4 @@
+<map id="inheritanceadb23b2723" name="inheritanceadb23b2723">
+<area shape="rect" id="node1" href="#FileServer.FileServer" target="_top" title="Implements the file server, which is a storage node in the sym&#45;DFS" alt="" coords="5,81,160,109"/>
+<area shape="rect" id="node2" title="The service base&#45;class. Derive from this class to implement custom RPyC" alt="" coords="22,5,143,33"/>
+</map>

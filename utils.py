@@ -15,6 +15,7 @@ import jwt
 def generate_token(user_id, role, private_key):
     """
     Generates a JWT token for clients and file servers.
+    
     Args:
         user_id (str):      The username or the server name.
         role (str):         The role of the entity.
@@ -35,6 +36,7 @@ def generate_token(user_id, role, private_key):
 def get_token_payload(token, public_key):
     """
     Gets the payload of a JWT token.
+    
     Args:
         token (str):  The JWT token.
     Returns:
@@ -55,6 +57,7 @@ def get_token_payload(token, public_key):
 def calculate_checksum(file_path):
     """
     Calculates the SHA256 checksum of a file.
+    
     Args:
         file_path (str): The path to the file.
     Returns:
@@ -73,6 +76,7 @@ def calculate_checksum(file_path):
 def truncate(value, max_length):
     """
     Truncates a string to a maximum length.
+    
     Args:
         value (str):        The string to truncate.
         max_length (int):   The maximum length of the string.
@@ -86,6 +90,7 @@ def truncate(value, max_length):
 def handle_keyboard_interrupt_client(signum, frame, client):
     """
     Handles a KeyboardInterrupt exception.
+    
     Args:
         signum (int):       The signal number.
         frame (object):     The stack frame.
@@ -102,6 +107,7 @@ def handle_keyboard_interrupt_client(signum, frame, client):
 def handle_keyboard_interrupt_file_server(signum, frame, file_server):
     """
     Handles a KeyboardInterrupt exception.
+    
     Args:
         signum (int):           The signal number.
         frame (object):         The stack frame.
@@ -127,6 +133,7 @@ def handle_keyboard_interrupt_file_server(signum, frame, file_server):
 def current_timestamp():
     """
     Returns the current timestamp in the format %Y-%m-%d %H:%M:%S.
+    
     Returns:
         str: The current timestamp in the format %Y-%m-%d %H:%M:%S.
     """
@@ -137,6 +144,7 @@ def current_timestamp():
 def is_valid_host(host):
     """
     Verifies that a host is localhost or a valid IP address.
+    
     Args:
         host (str): The host to verify.
     Returns:

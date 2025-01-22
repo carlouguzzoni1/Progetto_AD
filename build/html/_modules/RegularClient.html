@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RegularClient &#8212; sym-DFS-project 1.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=d1102ebc" />
+    <link rel="stylesheet" type="text/css" href="../_static/basic.css?v=686e5160" />
+    <link rel="stylesheet" type="text/css" href="../_static/alabaster.css?v=27fed22d" />
+    <link rel="stylesheet" type="text/css" href="../_static/graphviz.css?v=4ae1632d" />
+    <script src="../_static/documentation_options.js?v=f2a433a1"></script>
+    <script src="../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <h1>Source code for RegularClient</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span> <span class="nn">getpass</span>
+<span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">import</span> <span class="nn">sys</span>
+<span class="kn">from</span> <span class="nn">BaseClient</span> <span class="kn">import</span> <span class="n">BaseClient</span>
+<span class="kn">from</span> <span class="nn">getpass</span> <span class="kn">import</span> <span class="n">getpass</span>
+<span class="kn">import</span> <span class="nn">heartbeats</span>
+<span class="kn">from</span> <span class="nn">apscheduler.schedulers.background</span> <span class="kn">import</span> <span class="n">BackgroundScheduler</span>
+<span class="kn">import</span> <span class="nn">utils</span>
+<span class="kn">from</span> <span class="nn">functools</span> <span class="kn">import</span> <span class="n">partial</span>
+<span class="kn">import</span> <span class="nn">signal</span>
+
+
+
+<span class="n">CLIENT_BASE_DIR</span> <span class="o">=</span> <span class="s2">&quot;./CLI&quot;</span>
+
+
+
+<div class="viewcode-block" id="RegularClient">
+<a class="viewcode-back" href="../RegularClient.html#RegularClient.RegularClient">[docs]</a>
+<span class="k">class</span> <span class="nc">RegularClient</span><span class="p">(</span><span class="n">BaseClient</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Client class for regular users.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    
+    <span class="c1"># NOTE: il regular client è pensato per essere un utente generico del DFS.</span>
+    <span class="c1">#       Le funzionalità sono pertanto quelle di base, definite nella classe</span>
+    <span class="c1">#       BaseClient, più i metodi che consenstono l&#39;interazione con l&#39;utente.</span>
+    
+    
+    <span class="c1">##### DUNDER METHODS #####</span>
+    
+    
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">host</span><span class="p">,</span> <span class="n">port</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Initializes the client.</span>
+<span class="sd">        </span>
+<span class="sd">        Args:</span>
+<span class="sd">            host (str): The hostname or IP address of the name server.</span>
+<span class="sd">            port (int): The port number of the name server.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">host</span><span class="p">,</span> <span class="n">port</span><span class="p">)</span>
+    
+    
+    <span class="c1">##### ABSTRACT METHODS IMPLEMENTATION #####</span>
+    
+    
+<div class="viewcode-block" id="RegularClient.display_commands">
+<a class="viewcode-back" href="../RegularClient.html#RegularClient.RegularClient.display_commands">[docs]</a>
+    <span class="k">def</span> <span class="nf">display_commands</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Displays the available commands for the regular clients.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">        Welcome to sym-DFS Project Client.</span>
+<span class="s2">        Commands:</span>
+<span class="s2">        login               Log in as a user</span>
+<span class="s2">        logout              Log out</span>
+<span class="s2">        create-user         Create a new user</span>
+<span class="s2">        delete-user         Delete a user</span>
+<span class="s2">        list-files          List files of the user</span>
+<span class="s2">        upload              Upload a file</span>
+<span class="s2">        download            Download a file</span>
+<span class="s2">        delete-file         Delete a file</span>
+<span class="s2">        exit                Exit the program</span>
+<span class="s2">        show-commands       Show commands</span>
+<span class="s2">        &quot;&quot;&quot;</span><span class="p">)</span></div>
+
+    
+    
+<div class="viewcode-block" id="RegularClient.main_prompt">
+<a class="viewcode-back" href="../RegularClient.html#RegularClient.RegularClient.main_prompt">[docs]</a>
+    <span class="k">def</span> <span class="nf">main_prompt</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Main prompt for regular clients.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        
+        <span class="bp">self</span><span class="o">.</span><span class="n">connect</span><span class="p">()</span>              <span class="c1"># Connect to the name server.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">display_commands</span><span class="p">()</span>     <span class="c1"># Display the available commands.</span>
+        
+        <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+            <span class="c1"># Get user input.</span>
+            <span class="n">command</span> <span class="o">=</span> <span class="nb">input</span><span class="p">(</span>
+                <span class="s2">&quot;(</span><span class="si">{}</span><span class="s2">)&gt; &quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">logged_username</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">user_is_logged</span> <span class="k">else</span> <span class="s2">&quot;non-auth&quot;</span><span class="p">)</span>
+            <span class="p">)</span>
+            
+            <span class="c1"># Execute the command.</span>
+            <span class="k">match</span> <span class="n">command</span><span class="p">:</span>
+                <span class="k">case</span> <span class="s2">&quot;login&quot;</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">login</span><span class="p">()</span>
+                <span class="k">case</span> <span class="s2">&quot;logout&quot;</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">logout</span><span class="p">()</span>
+                <span class="k">case</span> <span class="s2">&quot;create-user&quot;</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">create_user</span><span class="p">()</span>
+                <span class="k">case</span> <span class="s2">&quot;delete-user&quot;</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">delete_user</span><span class="p">()</span>
+                <span class="k">case</span> <span class="s2">&quot;list-files&quot;</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">list_files</span><span class="p">()</span>
+                <span class="k">case</span> <span class="s2">&quot;upload&quot;</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">upload</span><span class="p">()</span>
+                <span class="k">case</span> <span class="s2">&quot;download&quot;</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">download</span><span class="p">()</span>
+                <span class="k">case</span> <span class="s2">&quot;delete-file&quot;</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">delete</span><span class="p">()</span>
+                <span class="k">case</span> <span class="s2">&quot;exit&quot;</span><span class="p">:</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Exiting...&quot;</span><span class="p">)</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">logout</span><span class="p">()</span>   <span class="c1"># Log out before exiting.</span>
+                    <span class="c1"># Connection is closed upon deletion, which happens on exit.</span>
+                    <span class="k">break</span>
+                <span class="k">case</span> <span class="s2">&quot;show-commands&quot;</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">display_commands</span><span class="p">()</span>
+                <span class="k">case</span><span class="w"> </span><span class="k">_</span><span class="p">:</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Unknown command. Type &#39;show-commands&#39; for a list of commands.&quot;</span><span class="p">)</span></div>
+
+    
+    
+    <span class="c1">##### USER INTERACTION METHODS #####</span>
+    
+    
+<div class="viewcode-block" id="RegularClient.login">
+<a class="viewcode-back" href="../RegularClient.html#RegularClient.RegularClient.login">[docs]</a>
+    <span class="k">def</span> <span class="nf">login</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Authenticates a regular user.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        
+        <span class="c1"># Check whether a user is already logged in.</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">user_is_logged</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Cannot login: an user is already logged in.&quot;</span><span class="p">)</span>
+            <span class="k">return</span>
+        
+        <span class="c1"># Get username and password from the user.</span>
+        <span class="n">username</span>    <span class="o">=</span> <span class="nb">input</span><span class="p">(</span><span class="s2">&quot;Insert username: &quot;</span><span class="p">)</span>
+        <span class="n">password</span>    <span class="o">=</span> <span class="n">getpass</span><span class="p">(</span><span class="s2">&quot;Insert password: &quot;</span><span class="p">)</span>
+        
+        <span class="c1"># Authenticate the user.</span>
+        <span class="n">result</span>      <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">conn</span><span class="o">.</span><span class="n">root</span><span class="o">.</span><span class="n">authenticate_user</span><span class="p">(</span><span class="n">username</span><span class="p">,</span> <span class="n">password</span><span class="p">)</span>
+        
+        <span class="c1"># Check whether the authentication was successful.</span>
+        <span class="k">if</span> <span class="n">result</span><span class="p">[</span><span class="s2">&quot;status&quot;</span><span class="p">]:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">user_is_logged</span>     <span class="o">=</span> <span class="kc">True</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">logged_username</span>    <span class="o">=</span> <span class="n">username</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">files_dir</span>          <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">client_root_dir</span><span class="p">,</span> <span class="n">username</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">token</span>              <span class="o">=</span> <span class="n">result</span><span class="p">[</span><span class="s2">&quot;token&quot;</span><span class="p">]</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">scheduler</span>          <span class="o">=</span> <span class="n">BackgroundScheduler</span><span class="p">()</span>
+            
+            <span class="c1"># Add activity heartbeat job.</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Starting periodic activity heartbeat job...&quot;</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">scheduler</span><span class="o">.</span><span class="n">add_job</span><span class="p">(</span>
+                <span class="n">heartbeats</span><span class="o">.</span><span class="n">send_activity_heartbeat</span><span class="p">,</span>
+                <span class="n">args</span><span class="o">=</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">conn</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">token</span><span class="p">],</span>
+                <span class="n">trigger</span><span class="o">=</span><span class="s1">&#39;interval&#39;</span><span class="p">,</span>
+                <span class="n">seconds</span><span class="o">=</span><span class="mi">30</span><span class="p">,</span>
+                <span class="nb">id</span><span class="o">=</span><span class="s2">&quot;activity_heartbeat&quot;</span>
+                <span class="p">)</span>
+            
+            <span class="c1"># Start the scheduler.</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">scheduler</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
+            
+            <span class="c1"># If this user doesn&#39;t have a directory, create it.</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">files_dir</span><span class="p">):</span>
+                <span class="n">os</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">files_dir</span><span class="p">)</span>
+        
+        <span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="p">[</span><span class="s2">&quot;message&quot;</span><span class="p">])</span></div>
+
+    
+    
+<div class="viewcode-block" id="RegularClient.logout">
+<a class="viewcode-back" href="../RegularClient.html#RegularClient.RegularClient.logout">[docs]</a>
+    <span class="k">def</span> <span class="nf">logout</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Logs out the current user.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">user_is_logged</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_cleanup</span><span class="p">()</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;No user is logged in.&quot;</span><span class="p">)</span></div>
+</div>
+
+
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    
+    <span class="c1"># Create the client.</span>
+    <span class="n">client</span> <span class="o">=</span> <span class="n">RegularClient</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">argv</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="nb">int</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">argv</span><span class="p">[</span><span class="mi">2</span><span class="p">]))</span>
+    
+    <span class="c1"># Handle keyboard interrupts.</span>
+    <span class="n">signal</span><span class="o">.</span><span class="n">signal</span><span class="p">(</span><span class="n">signal</span><span class="o">.</span><span class="n">SIGINT</span><span class="p">,</span> <span class="n">partial</span><span class="p">(</span><span class="n">utils</span><span class="o">.</span><span class="n">handle_keyboard_interrupt_client</span><span class="p">,</span> <span class="n">client</span><span class="o">=</span><span class="n">client</span><span class="p">))</span>
+    
+    <span class="c1"># Prompt is displayed until user manually exits.</span>
+    <span class="n">client</span><span class="o">.</span><span class="n">main_prompt</span><span class="p">()</span>
+</pre></div>
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">sym-DFS-project</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../index.html">Documentation overview</a><ul>
+  <li><a href="index.html">Module code</a><ul>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2025, Carlo Uguzzoni.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 8.1.3</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+    </div>
+
+    
+
+    
+  </body>
+</html>

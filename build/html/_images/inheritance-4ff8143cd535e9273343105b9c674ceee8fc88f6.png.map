@@ -1,0 +1,5 @@
+<map id="inheritance6c8ec19415" name="inheritance6c8ec19415">
+<area shape="rect" id="node1" href="BaseClient.html#BaseClient.BaseClient" target="_top" title="Abstract base class for client classes." alt="" coords="5,81,171,109"/>
+<area shape="rect" id="node3" href="#RootClient.RootClient" target="_top" title="Client class for root user. Root client is a singleton." alt="" coords="7,157,169,184"/>
+<area shape="rect" id="node2" title="Helper class that provides a standard way to create an ABC using" alt="" coords="50,5,126,33"/>
+</map>

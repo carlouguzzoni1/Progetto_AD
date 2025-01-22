@@ -1,0 +1,4 @@
+<map id="inheritance97a471c197" name="inheritance97a471c197">
+<area shape="rect" id="node1" href="#NameServer.NameServerService" target="_top" title="Represents the name server, which is the central node in the sym&#45;DFS architecture." alt="" coords="5,81,240,109"/>
+<area shape="rect" id="node2" title="The service base&#45;class. Derive from this class to implement custom RPyC" alt="" coords="62,5,183,33"/>
+</map>
