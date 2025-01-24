@@ -1,0 +1,7 @@
+\babel@toc {italian}{}\relax 
+\babel@toc {italian}{}\relax 
+\contentsline {chapter}{\numberline {1}Introduzione}{1}{chapter.1}%
+\contentsline {chapter}{\numberline {2}Architettura}{2}{chapter.2}%
+\contentsline {paragraph}{\nonumberline Name server}{2}{paragraph*.3}%
+\contentsline {paragraph}{\nonumberline File server}{4}{paragraph*.5}%
+\providecommand \tocbasic@end@toc@file {}\tocbasic@end@toc@file 

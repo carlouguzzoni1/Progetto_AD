@@ -1,0 +1,47 @@
+Table users {
+    username TEXT [pk]
+    password_hash TEXT [not null]
+    is_root BOOLEAN [not null, default: 0]
+    is_online BOOLEAN [not null, default: 0]
+    last_heartbeat TIMESTAMP
+}
+
+Table file_servers {
+    name TEXT [pk]
+    password_hash TEXT [not null]
+    address TEXT [not null]
+    port INTEGER [not null]
+    is_online BOOLEAN [not null, default: 0]
+    size INTEGER [not null]
+    free_space INTEGER [not null]
+    last_heartbeat TIMESTAMP
+    indexes {
+    (address, port)
+    }
+}
+
+Table files {
+    file_path TEXT [pk]
+    file_name TEXT [not null]
+    owner TEXT [not null]
+    size INTEGER [not null]
+    checksum TEXT [not null]
+    primary_server TEXT [not null]
+    uploaded_at TIMESTAMP [default: "CURRENT_TIMESTAMP"]
+    is_corrupted BOOLEAN [not null, default: 0]
+}
+
+Table replicas {
+    file_path TEXT [not null]
+    server TEXT [not null]
+    indexes {
+        (file_path, server)
+    }
+}
+
+
+Ref: files.primary_server > file_servers.name
+Ref: files.owner > users.username
+
+Ref: replicas.file_path > files.file_path
+Ref: replicas.server > file_servers.name
