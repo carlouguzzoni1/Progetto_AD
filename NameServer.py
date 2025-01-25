@@ -1061,7 +1061,7 @@ class NameServerService(rpyc.Service):
                 FROM files AS f
                 JOIN replicas AS r ON f.file_path = r.file_path
                 JOIN file_servers AS fs ON r.server = fs.name
-                WHERE file_path = ?
+                WHERE f.file_path = ?
                 AND fs.is_online = 1
                 """,
                 (file_path,)
@@ -1713,7 +1713,7 @@ class NameServerService(rpyc.Service):
             
             # If the primary server is offline, continue.
             if not primary_server:
-                print(f"File server is offline. Skipping file '{file_path}'.")
+                print(f"Primary file server is offline. Skipping file '{file_path}'.")
                 
                 continue
             
