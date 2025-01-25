@@ -1019,6 +1019,11 @@ class NameServerService(rpyc.Service):
         conn    = sqlite3.connect(self.db_path)
         cursor  = conn.cursor()
         
+        # TODO: controllare che il file esista.
+        
+        # TODO: controllare che il file non sia corrotto. Se lo è, restituire
+        #       un messaggio.
+        
         # Get host and port of the primary file server for the file.
         try:
             cursor.execute("""
@@ -1123,6 +1128,12 @@ class NameServerService(rpyc.Service):
         
         conn    = sqlite3.connect(self.db_path)
         cursor  = conn.cursor()
+        
+        # TODO: selezionare tutti i file servers che ospitano una replica del file.
+        
+        # TODO: selezionare la dimensione del file.
+        
+        # TODO: aggiornare lo spazio disponibile nei file servers.
         
         # Delete the file from the replicas table. 
         try:
@@ -1491,6 +1502,10 @@ class NameServerService(rpyc.Service):
         # If the requestor was the primary file server for the file, remove the
         # replica from the database then try to find a new primary file server.
         
+        # TODO: selezionare la dimensione del file.
+        
+        # TODO: aggiornare lo spazio disponibile nel file server.
+        
         # Basically, we need to delete the replica in any way.
         try:
             cursor.execute("""
@@ -1659,6 +1674,8 @@ class NameServerService(rpyc.Service):
         conn    = sqlite3.connect(self.db_path)
         cursor  = conn.cursor()
         
+        # TODO: replicare solo files non corrotti.
+        
         # Select the files that need to be replicated (IE those that have less than
         # K online replicas) and their primary server.
         try:
@@ -1763,8 +1780,13 @@ class NameServerService(rpyc.Service):
                     
                     return
             
+            # TODO: selezionare la dimensione del file.
+            
             # Update the replicas table.
             for file_server in file_servers:
+                
+                # TODO: aggiornare lo spazio disponibile nel file server.
+                
                 try:
                     cursor.execute("""
                         INSERT INTO replicas (file_path, server)
@@ -1993,6 +2015,9 @@ if __name__ == "__main__":
     #       non è necessario eseguire un controllo dinamico.
     
     scheduler   = BackgroundScheduler()   # Job scheduler.
+    
+    # TODO: inserire tutti i job in un master job che li esegua sequenzialmente.
+    #       L'ordine è: replica, consistenza, pulizia.
     
     print("Starting periodic replication job...")
     scheduler.add_job(

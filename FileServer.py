@@ -402,6 +402,9 @@ class FileServer(rpyc.Service):
             
             return
         
+        # TODO: controllare che il file esista. Se no, stampare un messaggio di
+        #       errore e restituire.
+        
         # Iterate through the file servers and send the file.
         for server in file_servers:
             # DEBUG
