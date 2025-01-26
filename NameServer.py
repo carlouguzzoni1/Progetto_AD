@@ -584,6 +584,7 @@ class NameServerService(rpyc.Service):
         """
         
         # TEST: cancellazione utente con files.
+        # TODO: update spazio libero nei fs. Rework della cancellazione.
         
         conn    = sqlite3.connect(self.db_path)
         cursor  = conn.cursor()
@@ -631,27 +632,103 @@ class NameServerService(rpyc.Service):
             
             return f"Error: wrong password for user '{username}'."
         
-        # Delete the user and his/her files and replicas.
+        ### Delete the user and his/her files and replicas.
+        
+        # Get all the files owned by the user and their size.
         try:
-            cursor.execute(
-                """
-                DELETE FROM users WHERE username = ?
+            cursor.execute("""
+                SELECT file_path, size
+                FROM files
+                WHERE owner = ?
                 """,
                 (username,)
                 )
-            conn.commit()
+            files = cursor.fetchall()
+        
+        except sqlite3.OperationalError as e:
+            print("Error selecting files for user:", e)
+            conn.close()
             
-            cursor.execute(
-                """
-                DELETE FROM files WHERE owner = ?
-                """,
-                (username,)
-                )
-            conn.commit()
+            return f"Error deleting user."
+        
+        # For each file owned by the user.
+        for file in files:
+            # Get all the file servers that host replicas of the file.
+            try:
+                cursor.execute("""
+                    SELECT name
+                    FROM file_servers
+                    WHERE name IN (
+                        SELECT server
+                        FROM replicas
+                        WHERE file_path = ?
+                        )
+                    """,
+                    (file[0],)
+                    )
+                file_servers = cursor.fetchall()
+                
             
-            cursor.execute(
-                """
-                DELETE FROM replicas WHERE owner = ?
+            except sqlite3.OperationalError as e:
+                print("Error selecting file servers for file:", e)
+                conn.close()
+                
+                continue
+                
+            # For each file server that hosts a replica of the file.
+            for file_server in file_servers:
+                # Update the file server free space.
+                try:
+                    cursor.execute("""
+                        UPDATE file_servers
+                        SET free_space = free_space + ?
+                        WHERE name = ?
+                        """,
+                        (file[1], file_server[0])
+                        )
+                    conn.commit()
+                
+                except sqlite3.OperationalError as e:
+                    print("Error updating free space for file server:", e)
+                    conn.close()
+                    
+                    continue
+                
+                # Delete the replica.
+                try:
+                    cursor.execute("""
+                        DELETE FROM replicas
+                        WHERE file_path = ? AND server = ?
+                        """,
+                        (file[0], file_server[0])
+                        )
+                    conn.commit()
+                
+                except sqlite3.OperationalError as e:
+                    print("Error deleting replica:", e)
+                    conn.close()
+                    
+                    continue
+            
+            # Delete the file.
+            try:
+                cursor.execute("""
+                    DELETE FROM files
+                    WHERE file_path = ?
+                    """,
+                    (file[0],)
+                    )
+                conn.commit()
+            
+            except sqlite3.OperationalError as e:
+                print("Error deleting file:", e)
+                conn.close()
+        
+        # Eventually, delete the user.
+        try:
+            cursor.execute("""
+                DELETE FROM users
+                WHERE username = ?
                 """,
                 (username,)
                 )
@@ -660,10 +737,10 @@ class NameServerService(rpyc.Service):
             return f"User '{username}' deleted successfully."
         
         except sqlite3.OperationalError as e:
-            print("Error while deleting user:", e)
+            print("Error deleting user:", e)
             conn.close()
             
-            return "Error deleting user {username}."
+            return f"Error deleting user."
         
         finally:
             conn.close()
@@ -1003,7 +1080,6 @@ class NameServerService(rpyc.Service):
         Returns:
             dict:               A dictionary containing the file server information.
         """
-        # TEST: download file da server primario e non.
         
         # Get the username from the token.
         payload = utils.get_token_payload(token, self._public_key)
@@ -1018,6 +1094,45 @@ class NameServerService(rpyc.Service):
         
         conn    = sqlite3.connect(self.db_path)
         cursor  = conn.cursor()
+        
+        # Get the file's name and its corrupted status.
+        try:
+            cursor.execute("""
+                SELECT file_name, is_corrupted
+                FROM files
+                WHERE file_path = ?
+                AND owner = ?
+                """,
+                (file_path, username)
+                )
+            result = cursor.fetchone()
+        
+        except sqlite3.OperationalError as e:
+            print(f"Error selecting record for file:", e)
+            conn.close()
+            
+            return {
+                "status":   False,
+                "message":  f"Error getting file server for file '{file_path}'."
+                }
+        
+        # If no file was found, return an error message.
+        if not result:
+            conn.close()
+            
+            return {
+                "status":   False,
+                "message":  f"File '{file_path}' doesn't exist."
+                }
+        
+        # If the file is corrupted, return an error message.
+        if result[1]:
+            conn.close()
+            
+            return {
+                "status":   False,
+                "message":  f"File '{file_path}' is corrupted. Cannot download."
+                }
         
         # Get host and port of the primary file server for the file.
         try:
@@ -1061,7 +1176,7 @@ class NameServerService(rpyc.Service):
                 FROM files AS f
                 JOIN replicas AS r ON f.file_path = r.file_path
                 JOIN file_servers AS fs ON r.server = fs.name
-                WHERE file_path = ?
+                WHERE f.file_path = ?
                 AND fs.is_online = 1
                 """,
                 (file_path,)
@@ -1110,9 +1225,6 @@ class NameServerService(rpyc.Service):
         #       I files vengono effettivamente cancellati dai file servers
         #       tramite un meccanismo periodico di garbage cleaning.
         
-        # TEST: cancellazione di un file con i nuovi meccanismi di replica e
-        #       garbage cleaning attivi.
-        
         # Get the username from the token.
         payload = utils.get_token_payload(token, self._public_key)
         
@@ -1123,6 +1235,63 @@ class NameServerService(rpyc.Service):
         
         conn    = sqlite3.connect(self.db_path)
         cursor  = conn.cursor()
+        
+        # Get all the file servers that host replicas of the file.
+        try:
+            cursor.execute("""
+                SELECT fs.name
+                FROM file_servers as fs
+                JOIN replicas AS r ON fs.name = r.server
+                JOIN files AS f ON r.file_path = f.file_path
+                WHERE r.file_path = ?
+                AND f.owner = ?
+                """,
+                (file_path, username)
+                )
+            file_servers = cursor.fetchall()
+        
+        except sqlite3.OperationalError as e:
+            print(f"Error selecting file servers which contain replicas of file:", e)
+            conn.close()
+            
+            return f"Error deleting file '{file_path}'."
+        
+        # Get the size of the file.
+        try:
+            cursor.execute("""
+                SELECT size
+                FROM files
+                WHERE file_path = ?
+                AND owner = ?
+                """,
+                (file_path, username)
+                )
+            file_size = cursor.fetchone()
+        
+        except sqlite3.OperationalError as e:
+            print(f"Error selecting size from record for file:", e)
+            conn.close()
+            
+            return f"Error deleting file '{file_path}'."
+        
+        # For each file server that hosts replicas of the file, add the file
+        # size to the available space.
+        for server in file_servers:
+            try:
+                cursor.execute("""
+                    UPDATE file_servers
+                    SET free_space = free_space + ?
+                    WHERE name = ?
+                    """,
+                    (int(file_size[0]), server[0])
+                    )
+                conn.commit()
+            
+            except sqlite3.OperationalError as e:
+                print(f"Error updating available space for file server:", e)
+                conn.close()
+                
+                return f"Error deleting file '{file_path}'."
         
         # Delete the file from the replicas table. 
         try:
@@ -1143,7 +1312,7 @@ class NameServerService(rpyc.Service):
             print(f"Error deleting record for replica of file:", e)
             conn.close()
             
-            return f"Error deleting replicas of file '{file_path}'."
+            return f"Error deleting file '{file_path}'."
         
         # Delete the file from the files table.        
         try:
@@ -1211,8 +1380,6 @@ class NameServerService(rpyc.Service):
             dict:           A dictionary with the status and the list of files.
         """
         
-        # TEST: lista di tutti i files con un file corrotto nel database.
-        
         # Get the client's role from the token.
         payload = utils.get_token_payload(token, self._public_key)
         
@@ -1239,7 +1406,7 @@ class NameServerService(rpyc.Service):
             cursor.execute("""
                 SELECT f.file_path, f.size, f.owner, f.checksum, f.is_corrupted, f.uploaded_at, r.server
                 FROM files AS f
-                JOIN replicas AS r ON f.file_path = r.file_path
+                LEFT JOIN replicas AS r ON f.file_path = r.file_path
                 """)
             result = cursor.fetchall()
         
@@ -1507,6 +1674,41 @@ class NameServerService(rpyc.Service):
             
             return f"Error removing replica for file '{file_path}'"
         
+        # Then, we must update the available space in the requesting file server.
+        # Get the size of the file.
+        try:
+            cursor.execute("""
+                SELECT size
+                FROM files
+                WHERE file_path = ?
+                """,
+                (file_path, )
+                )
+            file_size = cursor.fetchone()[0]
+        
+        except sqlite3.OperationalError as e:
+            print(f"Error selecting file size:", e)
+            conn.close()
+            
+            return f"Error getting the size of file '{file_path}'"
+        
+        # Update the available space in the file server.
+        try:
+            cursor.execute("""
+                UPDATE file_servers
+                SET free_space = free_space + ?
+                WHERE name = ?
+                """,
+                (int(file_size), name)
+                )
+            conn.commit()
+        
+        except sqlite3.OperationalError as e:
+            print(f"Error updating available space in file server:", e)
+            conn.close()
+            
+            return f"Error updating available space"
+        
         # If the requestor was not the primary server for the file, just return.
         if name != primary_server:
             conn.close()
@@ -1652,8 +1854,6 @@ class NameServerService(rpyc.Service):
             K (int):    The number of times to replicate the files.
         """
         
-        # TEST: replicazione di file con primary server offline.
-        
         print(f"[{utils.current_timestamp()}] Replicating files...")
         
         conn    = sqlite3.connect(self.db_path)
@@ -1670,6 +1870,7 @@ class NameServerService(rpyc.Service):
                 JOIN replicas AS r ON f.file_path = r.file_path
                 JOIN file_servers AS fs ON r.server = fs.name
                 WHERE fs.is_online = 1
+                AND f.is_corrupted = 0
                 GROUP BY f.file_path
                 HAVING active_replicas < ?
                 """,
@@ -1713,7 +1914,7 @@ class NameServerService(rpyc.Service):
             
             # If the primary server is offline, continue.
             if not primary_server:
-                print(f"File server is offline. Skipping file '{file_path}'.")
+                print(f"Primary file server is offline. Skipping file '{file_path}'.")
                 
                 continue
             
@@ -1763,8 +1964,44 @@ class NameServerService(rpyc.Service):
                     
                     return
             
+            # Get the size of the file.
+            try:
+                cursor.execute("""
+                    SELECT size
+                    FROM files
+                    WHERE file_path = ?
+                    """,
+                    (file_path, )
+                    )
+                file_size = cursor.fetchone()[0]
+            
+            except sqlite3.OperationalError as e:
+                print(f"Error selecting record for file '{file_path}':", e)
+                conn.close()
+                
+                return
+            
             # Update the replicas table.
             for file_server in file_servers:
+                
+                # Update the free space of the file server.
+                try:
+                    cursor.execute("""
+                        UPDATE file_servers
+                        SET free_space = free_space - ?
+                        WHERE name = ?
+                        """,
+                        (int(file_size), file_server[0])
+                        )
+                    conn.commit()
+                
+                except sqlite3.OperationalError as e:
+                    print(f"Error updating record for file server '{file_server[0]}':", e)
+                    conn.close()
+                    
+                    return
+                
+                # Insert the record in the replicas table.
                 try:
                     cursor.execute("""
                         INSERT INTO replicas (file_path, server)
@@ -1993,6 +2230,10 @@ if __name__ == "__main__":
     #       non è necessario eseguire un controllo dinamico.
     
     scheduler   = BackgroundScheduler()   # Job scheduler.
+    
+    # TODO: inserire tutti i job in un master job che li esegua sequenzialmente.
+    #       L'ordine è: replica, consistenza, pulizia.
+    # TODO: implementare un lock per il master job.
     
     print("Starting periodic replication job...")
     scheduler.add_job(

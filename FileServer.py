@@ -272,9 +272,10 @@ class FileServer(rpyc.Service):
                 }
         else:
             username = payload["username"]
+            role     = payload["role"]
         
         # Check whether the requestor is the owner of the file.
-        if os.path.dirname(file_path).split("/")[0] != username:
+        if role in ["regular", "root"] and os.path.dirname(file_path).split("/")[0] != username:
             return {
                 "status":   False,
                 "message":  "Error storing file. Requestor is not owner."
@@ -402,6 +403,15 @@ class FileServer(rpyc.Service):
             
             return
         
+        # Add the base directory to the file path to get the absolute file path.
+        abs_file_path   = os.path.join(self.files_dir, file_path)
+        
+        # Verify that the file exists.
+        if not os.path.exists(abs_file_path):
+            print(f"Error sending file replicas. File '{file_path}' not found.")
+            
+            return        
+        
         # Iterate through the file servers and send the file.
         for server in file_servers:
             # DEBUG
@@ -414,9 +424,6 @@ class FileServer(rpyc.Service):
             except Exception as e:
                 print(f"Error connecting to file server {server[0]}: {e}")
                 continue
-            
-            # Add the base directory to the file path.
-            abs_file_path   = os.path.join(self.files_dir, file_path)
             
             # Send the replica to the file server.
             with open(abs_file_path, "rb") as file:
@@ -510,8 +517,6 @@ class FileServer(rpyc.Service):
             files (list):    A list of the files and their checksums according
             to the database.
         """
-        
-        # TEST: cancellazione file nella directory di primary e non primary fs.
         
         print(f"[{utils.current_timestamp()}] Running consistency check...")
         
