@@ -1016,6 +1016,11 @@ INPUT Relazione.toc
 INPUT Relazione.toc
 OUTPUT Relazione.toc
 INPUT /usr/share/texlive/texmf-dist/fonts/tfm/jknappen/ec/tcrm1200.tfm
+INPUT ./img/architettura.png
+INPUT ./img/architettura.png
+INPUT img/architettura.png
+INPUT ./img/architettura.png
+INPUT ./img/architettura.png
 INPUT /usr/share/texlive/texmf-dist/tex/latex/base/t1cmtt.fd
 INPUT /usr/share/texlive/texmf-dist/tex/latex/base/t1cmtt.fd
 INPUT /usr/share/texlive/texmf-dist/tex/latex/base/t1cmtt.fd
@@ -1042,6 +1047,11 @@ INPUT ./img/ERD.jpg
 INPUT img/ERD.jpg
 INPUT ./img/ERD.jpg
 INPUT ./img/ERD.jpg
+INPUT ./img/upload_download.png
+INPUT ./img/upload_download.png
+INPUT img/upload_download.png
+INPUT ./img/upload_download.png
+INPUT ./img/upload_download.png
 INPUT Relazione.aux
 INPUT ./Relazione.out
 INPUT ./Relazione.out

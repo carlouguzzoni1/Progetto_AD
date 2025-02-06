@@ -583,9 +583,6 @@ class NameServerService(rpyc.Service):
             str:            A message indicating the result of the operation.
         """
         
-        # TEST: cancellazione utente con files.
-        # TODO: update spazio libero nei fs. Rework della cancellazione.
-        
         conn    = sqlite3.connect(self.db_path)
         cursor  = conn.cursor()
         
@@ -2231,7 +2228,7 @@ if __name__ == "__main__":
     
     scheduler   = BackgroundScheduler()   # Job scheduler.
     
-    # TODO: inserire tutti i job in un master job che li esegua sequenzialmente.
+    # TODO: inserire i job in un master job che li esegua sequenzialmente.
     #       L'ordine è: replica, consistenza, pulizia.
     # TODO: implementare un lock per il master job.
     

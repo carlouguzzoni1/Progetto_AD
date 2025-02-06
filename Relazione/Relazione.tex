@@ -70,7 +70,11 @@
 
         Sebbene il name server costituisca un nodo centrale che rappresenta single point of failure (SPOF), il sistema è sviluppato per garantire gestione decentralizzata dei files, scalabilità, replicazione e consistenza.
 
-        % Schema dell'architettura.
+        \begin{figure}[H]
+            \centering
+            \includegraphics[width = .6 \textwidth]{img/architettura.png}
+            \caption{Schema architetturale del sistema}
+        \end{figure}
 
         Il progetto è realizzato in Python, utilizzando la libreria \texttt{RPyC} per l'implementazione delle RPC. Il database del name server viene gestito tramite \texttt{SQLite}, utilizzando l'API di \texttt{sqlite3}.
 
@@ -86,13 +90,15 @@
 
                 \item Replica dei files nel DFS: ha lo scopo di mantenere $K$ repliche attive (ovvero in hosting da parte di file servers online) in ogni momento
 
-                \item Check di attività delle entità nel DFS: controlla se le entità connesse al name server hanno inviato un heartbeat, che confermasse la propria attività, entro un periodo di tempo fissato. Questo meccanismo ha lo scopo di rilevare e sistemare automaticamente disconnessioni che non seguono un protocollo corretto
-
                 \item Check di consistenza dei files: consiste nell'invio ai file servers di una lista dei files loro assegnati e dei relativi checksum, affinché essi possano verificarne la correttezza
 
                 \item Garbage collection: consiste nell'invio ai file servers di una lista dei files loro assegnati, affinché essi possano cancellare dal proprio storage quelli non più necessari
 
+                \item Check di attività delle entità nel DFS: controlla se le entità connesse al name server hanno inviato un heartbeat, che confermasse la propria attività, entro un periodo di tempo fissato. Questo meccanismo ha lo scopo di rilevare e sistemare automaticamente disconnessioni che non seguono un protocollo corretto
+
             \end{itemize}
+
+            % Una volta sequenzializzati i tasks periodici (in particolare i primi 3), sarà necessario specificare qui o nel seguito perché lo si è fatto ed il loro esatto ordine di esecuzione.
 
             Il name server è un'entità concepita per essere unica all'interno del sistema. Questa proprietà è garantita tramite l'uso del design pattern "Singleton" e della gestione di un file di lock.\\
             Il progetto supporta un sistema di registrazione e logging sia per i clients che per i file servers. Il file server mette a disposizione tutte le RPC per la gestione delle entità:
@@ -190,6 +196,16 @@
 
     \chapter{Interazioni}
 
-        
+        \paragraph{Upload e download}
+
+            Queste sono senz'altro le due interazioni più comuni nell'uso del FSD che coinvolgono direttamente ed attivamente i clients e le entità server.\\
+            Nel primo caso, il client chiama il metodo RPC \texttt{exposed\_get\_file\_server\_upload} del name server. Quest'ultimo interroga il database centrale e restituisce le coordinate di un file  server online in grado di ricevere il file. Come abbiamo detto, tale file server viene marcato come "primary". Ciò significa che sarà il primo a ricevere il file, il punto di riferimento per le repliche e la prima scelta in caso di download. A questo punto, il client si connette direttamente al file server indicato, richiamando la RPC \texttt{exposed\_store\_file}, che provvede a trasferire il file generando, se necessario, tutta la struttura di directories.\\
+            La procedura di download segue una dinamica del tutto analoga. Il client si rivolge al name server con la RPC \texttt{exposed\_get\_file\_server\_download}, che fornisce le coordinate del primary server del file specificato, o quelle di un altro file server se questo non è online. Il client si connette al file server, richiamando la RPC \texttt{exposed\_send\_file} per ottenere il file.
+
+            \begin{figure}[H]
+                \centering
+                \includegraphics[width = .6 \textwidth]{img/upload_download.png}
+                \caption{Interazioni clients/servers per upload/download}
+            \end{figure}
 
 \end{document}
