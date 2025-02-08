@@ -208,4 +208,38 @@
                 \caption{Interazioni clients/servers per upload/download}
             \end{figure}
 
+        \paragraph{Tasks periodici}
+
+            % Opzionale introduzione all'ordine dei tasks periodici e al master job.
+
+            \subparagraph{Replicazione}
+
+                La replicazione riguarda tutti quei files che hanno meno di $K$ repliche attive, ovvero presenti su meno di $K$ file servers online. Questi vengono selezionati dal name server, assieme alle coordinate (ovvero la coppia \texttt{host}, \texttt{port}) del relativo primary server. Il name server chiama quindi la RPC \texttt{exposed\_send\_file\_replicas}, allegando le coordinate di tutti i file servers online che non ospitano già una replica del file, per raggiungere un massimo di $K$ in totale.\\
+                A questo punto, il primary file server, iterativamente, invia il file ai nuovi file servers tramite la RPC \texttt{exposed\_store\_file}.\\
+                Una volta restituita al chiamante la prima RPC, vengono create le entry nella tabella \texttt{replicas} del database centrale. Repliche non andate a buon fine vengono successivamente eliminate dai tasks di consistency check e garbage cleaning.
+
+                \begin{figure}[H]
+                    \centering
+                    \includegraphics[width = .6 \textwidth]{img/replica.png}
+                    \caption{Interazioni name server/file servers per replicazione}
+                \end{figure}
+
+            \subparagraph{Check di consistenza}
+
+                Il name server invia a tutti i file servers i nomi dei files in essi salvati ed i relativi checksums, così che questi possano controllarne l'integrità. Questo processo avviene tramite la chiamata della RPC \texttt{exposed\_consistency\_check}.\\
+                Nel caso il checksum calcolato sul file nello storage del file server non corrisponda a quello fornito dal name server, oppure il file non venga trovato, il file server chiama una apposita RPC del name server per gestire l'inconsistenza operando sul database centrale. Questa RPC è \texttt{exposed\_handle\_inconsistency}.\\
+                Nel caso di inconsistenza, il name server cancella la replica sul file server chiamate, così che questa venga rimossa dal successivo garbage cleaning. Dopodiché, se si trattava di un file server primario ne assegna uno nuovo al file, dando priorità a quelli online che ne ospitano una copia. In caso contrario, la procedura termina.\\
+                Se non viene trovato alcun file server contenente una replica per il file, esso viene marcato come \texttt{corrupted}. I files corrotti non possono più essere reperiti dai clients, ma solo cancellati. I clients possono conoscere lo stato di ogni file di loro proprietà tramite la lista dei propri files sul FSD.
+
+                \begin{figure}[H]
+                    \centering
+                    \includegraphics[width = .4 \textwidth]{img/consistency.png}
+                    \caption{Interazioni name server/file servers per check di consistenza}
+                \end{figure}
+
+            \subparagraph{Garbage cleaning}
+
+                Il name server invia a tutti i file servers i nomi dei files in essi salvati. Questi nomi consistono in realtà del campo \texttt{file\_path} della tabella \texttt{files}, ovvero del path assoluto dei files nel FSD.\\
+                I file servers rimuovono tutti i files nel proprio storage che non compaiono nella lista ricevuta dal name server, più le directories rimaste vuote a seguito della rimozione.
+
 \end{document}

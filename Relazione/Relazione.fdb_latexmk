@@ -1,12 +1,12 @@
 # Fdb version 4
-["biber Relazione"] 0 "Relazione.bcf" "Relazione.bbl" "Relazione" 1738857499.40436 -1
-  "Relazione.bcf" 1738857499.30497 107256 8c7011d98308f1529dac1556a011d94b "pdflatex"
+["biber Relazione"] 0 "Relazione.bcf" "Relazione.bbl" "Relazione" 1739037755.6105 -1
+  "Relazione.bcf" 1739037755.51147 107256 8c7011d98308f1529dac1556a011d94b "pdflatex"
   (generated)
   "Relazione.bbl"
   "Relazione.blg"
   (rewritten before read)
-["pdflatex"] 1738857497.90237 "/home/cuguzzoni/Scrivania/Progetto_AD/Relazione/Relazione.tex" "Relazione.pdf" "Relazione" 1738857499.40468 0
-  "/home/cuguzzoni/Scrivania/Progetto_AD/Relazione/Relazione.tex" 1738857496.17601 15617 17812fd3900b7fd0fddd843d8d8e4336 ""
+["pdflatex"] 1739037754.00851 "/home/cuguzzoni/Scrivania/Progetto_AD/Relazione/Relazione.tex" "Relazione.pdf" "Relazione" 1739037755.61083 0
+  "/home/cuguzzoni/Scrivania/Progetto_AD/Relazione/Relazione.tex" 1739037753.74649 19050 2d88a86d8fb8aad2f7cc55f2a1b72968 ""
   "/usr/share/texlive/texmf-dist/fonts/enc/dvips/cm-super/cm-super-t1.enc" 1136849721 2971 def0b6c1f0b107b3b936def894055589 ""
   "/usr/share/texlive/texmf-dist/fonts/enc/dvips/cm-super/cm-super-ts1.enc" 1136849721 2900 1537cc8184ad1792082cd229ecc269f4 ""
   "/usr/share/texlive/texmf-dist/fonts/map/fontname/texfonts.map" 1577235249 3524 cb3e574dea2d1052e39280babc910dc8 ""
@@ -150,14 +150,16 @@
   "/usr/share/texlive/texmf-dist/web2c/texmf.cnf" 1721433600 40900 887e0dc8cac988a9e9c574af364cf837 ""
   "/var/lib/texmf/fonts/map/pdftex/updmap/pdftex.map" 1733339108.31774 4602601 5d02a5c5d52d7237566d144856366042 ""
   "/var/lib/texmf/web2c/pdftex/pdflatex.fmt" 1733338724 7753171 06d1bd24765dbdba5dfc514b6359be82 ""
-  "Relazione.aux" 1738857499.30197 3236 26e491547d268a1fc750fe30917af604 "pdflatex"
+  "Relazione.aux" 1739037755.50847 4070 bd1c5dd9709e9f1fba61be19e36304a7 "pdflatex"
   "Relazione.bbl" 1737736811.96113 0 d41d8cd98f00b204e9800998ecf8427e "biber Relazione"
-  "Relazione.out" 1738857498.96198 0 d41d8cd98f00b204e9800998ecf8427e "pdflatex"
-  "Relazione.run.xml" 1738857499.30597 2259 a504618d0258c764baca86050fce2352 "pdflatex"
-  "Relazione.tex" 1738857496.17601 15617 17812fd3900b7fd0fddd843d8d8e4336 ""
-  "Relazione.toc" 1738857499.30597 694 9ef17c6f3dc77f595725739f1a30bad3 "pdflatex"
+  "Relazione.out" 1739037755.06348 0 d41d8cd98f00b204e9800998ecf8427e "pdflatex"
+  "Relazione.run.xml" 1739037755.51247 2259 a504618d0258c764baca86050fce2352 "pdflatex"
+  "Relazione.tex" 1739037753.74649 19050 2d88a86d8fb8aad2f7cc55f2a1b72968 ""
+  "Relazione.toc" 1739037755.51247 1019 6c168a090cadf29d039270017a5e4c02 "pdflatex"
   "img/ERD.jpg" 1737734811.27587 47291 a403083afb25aa675ce8206a557c83b8 ""
   "img/architettura.png" 1738857373.77434 126997 b19e6a30e636cb9869a5ac518ada5ff4 ""
+  "img/consistency.png" 1739037619.54993 80211 9a8564c7e3f5a720e435d26ccc547ffa ""
+  "img/replica.png" 1739037619.54393 103047 ff5427ce73708df2c59884b38fdf4c55 ""
   "img/upload_download.png" 1738857373.76034 119349 3615d7937ee352224cb922dcb336a922 ""
   (generated)
   "Relazione.aux"

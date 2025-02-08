@@ -1052,6 +1052,16 @@ INPUT ./img/upload_download.png
 INPUT img/upload_download.png
 INPUT ./img/upload_download.png
 INPUT ./img/upload_download.png
+INPUT ./img/replica.png
+INPUT ./img/replica.png
+INPUT img/replica.png
+INPUT ./img/replica.png
+INPUT ./img/replica.png
+INPUT ./img/consistency.png
+INPUT ./img/consistency.png
+INPUT img/consistency.png
+INPUT ./img/consistency.png
+INPUT ./img/consistency.png
 INPUT Relazione.aux
 INPUT ./Relazione.out
 INPUT ./Relazione.out
