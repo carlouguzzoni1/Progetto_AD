@@ -2228,9 +2228,20 @@ if __name__ == "__main__":
     
     scheduler   = BackgroundScheduler()   # Job scheduler.
     
-    # TODO: inserire i job in un master job che li esegua sequenzialmente.
+    # IN FORSE.
+    # TODO: inserire i tasks periodici in un master job, che li esegua sequenzialmente.
     #       L'ordine è: replica, consistenza, pulizia.
     # TODO: implementare un lock per il master job.
+    
+    # DA FARE.
+    # TODO: introdurre funzione per updating di files esistenti (per ogni client).
+    #       ARGS:
+    #           - Nome di un file già nel database centrale.
+    #           - File sorgente dalla directory locale.
+    #       
+    #       AZIONI:
+    #           - Cancellazione file
+    #           - Re-upload file
     
     print("Starting periodic replication job...")
     scheduler.add_job(

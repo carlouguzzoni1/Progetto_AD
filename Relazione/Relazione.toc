@@ -12,4 +12,5 @@
 \contentsline {subparagraph}{\nonumberline Replicazione}{7}{subparagraph*.15}%
 \contentsline {subparagraph}{\nonumberline Check di consistenza}{8}{subparagraph*.17}%
 \contentsline {subparagraph}{\nonumberline Garbage cleaning}{9}{subparagraph*.19}%
+\contentsline {subparagraph}{\nonumberline Eventual consistency}{9}{subparagraph*.21}%
 \providecommand \tocbasic@end@toc@file {}\tocbasic@end@toc@file 

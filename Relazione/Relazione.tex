@@ -53,6 +53,8 @@
     \newpage
     \setcounter{page}{1}
 
+    % Aggiornare la relazione con funzionalità di update (client/name server).
+
     \chapter{Introduzione}
 
         Il progetto consiste di un prototipo di file system distribuito (FSD), principalmente basato sull'uso di remote procedure calls (RPC).\\
@@ -241,5 +243,22 @@
 
                 Il name server invia a tutti i file servers i nomi dei files in essi salvati. Questi nomi consistono in realtà del campo \texttt{file\_path} della tabella \texttt{files}, ovvero del path assoluto dei files nel FSD.\\
                 I file servers rimuovono tutti i files nel proprio storage che non compaiono nella lista ricevuta dal name server, più le directories rimaste vuote a seguito della rimozione.
+
+            \subparagraph{Eventual consistency}
+
+                Il concetto di eventual consistency è stato formalmente definito da Werner Vogels come segue: \textit{"Se non vengono eseguite nuove operazioni di aggiornamento, dopo un tempo sufficientemente lungo tutte le repliche del sistema convergeranno allo stesso stato"}.\\
+                Nel FSD realizzato, il name server, attraverso l'esecuzione dei tasks periodici descritti sopra, garantisce questa proprietà.
+
+                \begin{itemize}
+
+                    \item La replica fornisce ridondanza e disponibilità
+
+                    \item Il consistency check realizza sincronizzazione tra i files, prendendo come riferimento privilegiato il file server primario
+
+                    \item Il garbage cleaning rimuove files incongruenti per evitare incoerenza tra le repliche
+
+                \end{itemize}
+
+                In questo modo, anche in presenza di fallimenti temporanei o partizioni di rete, tutte le repliche alla fine rifletteranno uno stato coerente con la visione del name server.
 
 \end{document}
