@@ -53,8 +53,6 @@
     \newpage
     \setcounter{page}{1}
 
-    % Aggiornare la relazione con funzionalità di update (client/name server).
-
     \chapter{Introduzione}
 
         Il progetto consiste di un prototipo di file system distribuito (FSD), principalmente basato sull'uso di remote procedure calls (RPC).\\
@@ -100,7 +98,9 @@
 
             \end{itemize}
 
-            % Una volta sequenzializzati i tasks periodici (in particolare i primi 3), sarà necessario specificare qui o nel seguito perché lo si è fatto ed il loro esatto ordine di esecuzione.
+            % Se si decide di farlo, una volta sequenzializzati i tasks periodici
+            %(in particolare i primi 3), sarà necessario specificare qui o nel
+            % seguito perché lo si è fatto ed il loro esatto ordine di esecuzione.
 
             Il name server è un'entità concepita per essere unica all'interno del sistema. Questa proprietà è garantita tramite l'uso del design pattern "Singleton" e della gestione di un file di lock.\\
             Il progetto supporta un sistema di registrazione e logging sia per i clients che per i file servers. Il file server mette a disposizione tutte le RPC per la gestione delle entità:
@@ -111,7 +111,7 @@
 
                 \item \texttt{exposed\_authenticate\_user} / \texttt{exposed\_authenticate\_file\_server}
 
-                \item \texttt{exposed\_delete\_file\_user}
+                \item \texttt{exposed\_delete\_user}
 
                 \item \texttt{exposed\_logout\_user} / \texttt{exposed\_logout\_file\_server}
 
@@ -138,6 +138,8 @@
                 \item \texttt{exposed\_get\_file\_server\_download}: restituisce le coordinate (\texttt{ip}, \texttt{port}) di un file server per il download di un file, dando priorità al file server marcato come "primary" per tale file
 
                 \item \texttt{exposed\_delete\_file}: cancella un file dal sistema. La cancellazione avviene solo nel database, il task di garbage collection provvederà all'eliminazione effettiva del file dal FSD
+
+                \item \texttt{exposed\_get\_file\_server\_update}: restituisce le coordinate (\texttt{ip}, \texttt{port}) di un file server per l'aggiornamento di un file. L'update di fatto consiste in una sequenza di cancellazione ed upload, per garantire immediata disponibilità del servizio più replicazione e consistenza alla prima chiamata dei tasks periodici
 
                 \item \texttt{exposed\_list\_all\_files}: esclusiva del client amministratore, restituisce la lista di tutti i files e le relative repliche presenti nel sistema
 

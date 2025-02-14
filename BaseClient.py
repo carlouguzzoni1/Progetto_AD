@@ -197,13 +197,17 @@ class BaseClient(ABC):
                 print(tabulate(result["files"], headers="keys"))
     
     
-    def upload_file(self, client_path, server_path):
+    def _transfer_file(self, client_path, server_path, rpc_method):
         """
-        Uploads a file into the DFS.
+        Transfers a file to a file server (used for both upload and update).
         
         Args:
-            client_path (str): The absolute path of the file to upload.
-            server_path (str): The directory where the file will be stored.
+            client_path (str):  Absolute path of the file to transfer.
+            server_path (str):  Path where the file will be stored in DFS.
+            rpc_method (str):   Name of the RPC method to call on the FileServer.
+        
+        Returns:
+            dict: The result of the file transfer.
         """
         
         # Calculate the checksum of the file.
@@ -218,18 +222,24 @@ class BaseClient(ABC):
         server_path = os.path.join(server_path, file_name)
         
         # Ask the name server for the file server.
-        result      = self.conn.root.get_file_server_upload(
-            self.token,
-            server_path,
-            file_size,
-            checksum
+        if rpc_method == "get_file_server_upload":
+            result      = self.conn.root.get_file_server_upload(
+                self.token, server_path, file_size, checksum
             )
+        elif rpc_method == "get_file_server_update":
+            result      = self.conn.root.get_file_server_update(
+                self.token, server_path, file_size, checksum
+            )
+        else:
+            print("Invalid RPC method.")
+            
+            return
         
         print(result["message"])
         
         # If a file server was not found or an error occured, exit.
         if not result["status"]:
-            return
+            return result
         
         # Get the file server's host and port.
         fs_host     = result["host"]
@@ -238,16 +248,16 @@ class BaseClient(ABC):
         # Connect to the file server.
         fs_conn     = rpyc.connect(fs_host, fs_port)
         
-        # Upload the file.
+        # Read file data and send to the server
         with open(client_path, "rb") as file:
             file_data       = file.read()
-            upload_result   = fs_conn.root.store_file(
+            transfer_result = fs_conn.root.store_file(
                 server_path,
                 file_data,
                 self.token
-                )
-            print(upload_result["message"])
-        
+            )
+            print(transfer_result["message"])
+            
         # Close the file server connection.
         fs_conn.close()
     
@@ -269,7 +279,8 @@ class BaseClient(ABC):
                 
                 return
             
-            self.upload_file(file_name, server_path)
+            # self.upload_file(file_name, server_path)
+            self._transfer_file(file_name, server_path, "get_file_server_upload")
     
     
     def download_file(self, server_path):
@@ -360,3 +371,23 @@ class BaseClient(ABC):
             server_abs_path = input("Insert the absolute path of the file to delete: ")
             
             self.delete_file(server_abs_path)
+    
+    
+    def update(self):
+        """
+        User interface for updating a file.
+        """
+        
+        if not self.user_is_logged:
+            print("You must be logged in to update a file.")
+        else:
+            client_path = input("Insert absolute file path: ")
+            server_path = input("Insert the directory of the file to update: ")
+            
+            # Check if the file exists.
+            if not os.path.exists(client_path):
+                print(f"File {client_path} not found.")
+                
+                return
+            
+            self._transfer_file(client_path, server_path, "get_file_server_update")

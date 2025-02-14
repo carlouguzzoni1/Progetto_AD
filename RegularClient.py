@@ -59,6 +59,7 @@ class RegularClient(BaseClient):
         upload              Upload a file
         download            Download a file
         delete-file         Delete a file
+        update-file         Update a file
         exit                Exit the program
         show-commands       Show commands
         """)
@@ -96,6 +97,8 @@ class RegularClient(BaseClient):
                     self.download()
                 case "delete-file":
                     self.delete()
+                case "update-file":
+                    self.update()
                 case "exit":
                     print("Exiting...")
                     self.logout()   # Log out before exiting.
