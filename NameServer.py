@@ -1333,6 +1333,85 @@ class NameServerService(rpyc.Service):
         return f"File '{file_path}' deleted."
     
     
+    def exposed_get_file_server_update(self, token, file_path, file_size, checksum):
+        """
+        Updates a file in the DFS.
+        
+        Args:
+            token (str):        The token of the requestor.
+            file_path (str):    The path of the file in the DFS.
+            file_size (int):    The size of the file.
+            checksum (str):     The checksum of the file.
+        
+        Returns:
+            dict:               A dictionary containing the file server information.
+        """
+        
+        # NOTE: la modifica di un file è un processo non banale che consiste di:
+        #       - Aggiornare le informazioni del file nel database
+        #       - Reperire le coordinate del primary file server
+        #         Se il primary file server non è online, reperire le coordinate
+        #         di un altro file server online che ospita una replica e promuoverlo
+        #         al ruolo di primary. Nel caso si voglia garantire disponibilità del
+        #         servizio, si deve dare l'opportunità al client di caricare il nuovo
+        #         file su un qualsiasi file server online
+        #       - Eliminare tutte le repliche sugli altri file servers, perché in
+        #         ogni caso il consistency check le eliminerà trovando un'inconsis-
+        #         tenza nel checksum. Inoltre, aggiornare lo spazio disponibile su
+        #         ogni file server che ospita una replica, rimuovendo lo spazio
+        #         occupato dal vecchio file, perché dall'esecuzione di questa RPC
+        #         in poi, la dimensione su database sarà relativa al nuovo file
+        #       - Inviare le coordinate al client, che procederà all'invio
+        #       - Eseguire attivamente garbage cleaning e replica del nuovo file
+        #       L'esecuzione della cancellazione del vecchio file ed il successivo
+        #       re-upload coprono all'incirca tutte queste operazioni senza aggiungere
+        #       una quantità considerevole di codice.
+        
+        # Get the username from the token.
+        payload = utils.get_token_payload(token, self._public_key)
+        
+        if payload is None:
+            return f"Error updating file. Corrupted token."
+        else:
+            username = payload["username"]
+        
+        conn    = sqlite3.connect(self.db_path)
+        cursor  = conn.cursor()
+        
+        # Check whether the file already exists.
+        try:
+            cursor.execute("""
+                SELECT file_path
+                FROM files
+                WHERE file_path = ?
+                AND owner = ?
+                """,
+                (file_path, username)
+                )
+            result = cursor.fetchone()
+        
+        except sqlite3.OperationalError as e:
+            print(f"Error selecting record for file:", e)
+            conn.close()
+            
+            return f"Error updating file '{file_path}'."
+        
+        # If the file does not exist, we can't update. Return an error message.
+        if not result:
+            return f"Error updating file '{file_path}'. File does not exist."
+        
+        # Delete the file in the DFS.
+        self.exposed_delete_file(file_path, token)
+        
+        # Re-upload the file.
+        return self.exposed_get_file_server_upload(
+            token,
+            file_path,
+            file_size,
+            checksum
+        )
+    
+    
     ##### ROOT CLIENT RPCs #####
     
     
@@ -2232,16 +2311,6 @@ if __name__ == "__main__":
     # TODO: inserire i tasks periodici in un master job, che li esegua sequenzialmente.
     #       L'ordine è: replica, consistenza, pulizia.
     # TODO: implementare un lock per il master job.
-    
-    # DA FARE.
-    # TODO: introdurre funzione per updating di files esistenti (per ogni client).
-    #       ARGS:
-    #           - Nome di un file già nel database centrale.
-    #           - File sorgente dalla directory locale.
-    #       
-    #       AZIONI:
-    #           - Cancellazione file
-    #           - Re-upload file
     
     print("Starting periodic replication job...")
     scheduler.add_job(

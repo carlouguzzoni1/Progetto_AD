@@ -108,6 +108,7 @@ class RootClient(BaseClient):
         upload              Upload a file
         download            Download a file
         delete-file         Delete a file
+        update-file         Update a file
         list-all-files      List all files in the DFS
         list-all-clients    List all clients in the DFS
         list-all-fs         List all file servers in the DFS
@@ -143,6 +144,8 @@ class RootClient(BaseClient):
                     self.download()
                 case "delete-file":
                     self.delete()
+                case "update-file":
+                    self.update()
                 case "list-all-files":
                     self.list_all_files()
                 case "list-all-clients":
