@@ -53,6 +53,8 @@
     \newpage
     \setcounter{page}{1}
 
+    % Aggiornare la relazione con funzionalità di update (client/name server).
+
     \chapter{Introduzione}
 
         Il progetto consiste di un prototipo di file system distribuito (FSD), principalmente basato sull'uso di remote procedure calls (RPC).\\
@@ -70,7 +72,11 @@
 
         Sebbene il name server costituisca un nodo centrale che rappresenta single point of failure (SPOF), il sistema è sviluppato per garantire gestione decentralizzata dei files, scalabilità, replicazione e consistenza.
 
-        % Schema dell'architettura.
+        \begin{figure}[H]
+            \centering
+            \includegraphics[width = .6 \textwidth]{img/architettura.png}
+            \caption{Schema architetturale del sistema}
+        \end{figure}
 
         Il progetto è realizzato in Python, utilizzando la libreria \texttt{RPyC} per l'implementazione delle RPC. Il database del name server viene gestito tramite \texttt{SQLite}, utilizzando l'API di \texttt{sqlite3}.
 
@@ -86,13 +92,15 @@
 
                 \item Replica dei files nel DFS: ha lo scopo di mantenere $K$ repliche attive (ovvero in hosting da parte di file servers online) in ogni momento
 
-                \item Check di attività delle entità nel DFS: controlla se le entità connesse al name server hanno inviato un heartbeat, che confermasse la propria attività, entro un periodo di tempo fissato. Questo meccanismo ha lo scopo di rilevare e sistemare automaticamente disconnessioni che non seguono un protocollo corretto
-
                 \item Check di consistenza dei files: consiste nell'invio ai file servers di una lista dei files loro assegnati e dei relativi checksum, affinché essi possano verificarne la correttezza
 
                 \item Garbage collection: consiste nell'invio ai file servers di una lista dei files loro assegnati, affinché essi possano cancellare dal proprio storage quelli non più necessari
 
+                \item Check di attività delle entità nel DFS: controlla se le entità connesse al name server hanno inviato un heartbeat, che confermasse la propria attività, entro un periodo di tempo fissato. Questo meccanismo ha lo scopo di rilevare e sistemare automaticamente disconnessioni che non seguono un protocollo corretto
+
             \end{itemize}
+
+            % Una volta sequenzializzati i tasks periodici (in particolare i primi 3), sarà necessario specificare qui o nel seguito perché lo si è fatto ed il loro esatto ordine di esecuzione.
 
             Il name server è un'entità concepita per essere unica all'interno del sistema. Questa proprietà è garantita tramite l'uso del design pattern "Singleton" e della gestione di un file di lock.\\
             Il progetto supporta un sistema di registrazione e logging sia per i clients che per i file servers. Il file server mette a disposizione tutte le RPC per la gestione delle entità:
@@ -190,6 +198,101 @@
 
     \chapter{Interazioni}
 
-        
+        \paragraph{Upload e download}
+
+            Queste sono senz'altro le due interazioni più comuni nell'uso del FSD che coinvolgono direttamente ed attivamente i clients e le entità server.\\
+            Nel primo caso, il client chiama il metodo RPC \texttt{exposed\_get\_file\_server\_upload} del name server. Quest'ultimo interroga il database centrale e restituisce le coordinate di un file  server online in grado di ricevere il file. Come abbiamo detto, tale file server viene marcato come "primary". Ciò significa che sarà il primo a ricevere il file, il punto di riferimento per le repliche e la prima scelta in caso di download. A questo punto, il client si connette direttamente al file server indicato, richiamando la RPC \texttt{exposed\_store\_file}, che provvede a trasferire il file generando, se necessario, tutta la struttura di directories.\\
+            La procedura di download segue una dinamica del tutto analoga. Il client si rivolge al name server con la RPC \texttt{exposed\_get\_file\_server\_download}, che fornisce le coordinate del primary server del file specificato, o quelle di un altro file server se questo non è online. Il client si connette al file server, richiamando la RPC \texttt{exposed\_send\_file} per ottenere il file.
+
+            \begin{figure}[H]
+                \centering
+                \includegraphics[width = .6 \textwidth]{img/upload_download.png}
+                \caption{Interazioni clients/servers per upload/download}
+            \end{figure}
+
+        \paragraph{Tasks periodici}
+
+            % Opzionale introduzione all'ordine dei tasks periodici e al master job.
+
+            \subparagraph{Replicazione}
+
+                La replicazione riguarda tutti quei files che hanno meno di $K$ repliche attive, ovvero presenti su meno di $K$ file servers online. Questi vengono selezionati dal name server, assieme alle coordinate (ovvero la coppia \texttt{host}, \texttt{port}) del relativo primary server. Il name server chiama quindi la RPC \texttt{exposed\_send\_file\_replicas}, allegando le coordinate di tutti i file servers online che non ospitano già una replica del file, per raggiungere un massimo di $K$ in totale.\\
+                A questo punto, il primary file server, iterativamente, invia il file ai nuovi file servers tramite la RPC \texttt{exposed\_store\_file}.\\
+                Una volta restituita al chiamante la prima RPC, vengono create le entry nella tabella \texttt{replicas} del database centrale. Repliche non andate a buon fine vengono successivamente eliminate dai tasks di consistency check e garbage cleaning.
+
+                \begin{figure}[H]
+                    \centering
+                    \includegraphics[width = .6 \textwidth]{img/replica.png}
+                    \caption{Interazioni name server/file servers per replicazione}
+                \end{figure}
+
+            \subparagraph{Check di consistenza}
+
+                Il name server invia a tutti i file servers i nomi dei files in essi salvati ed i relativi checksums, così che questi possano controllarne l'integrità. Questo processo avviene tramite la chiamata della RPC \texttt{exposed\_consistency\_check}.\\
+                Nel caso il checksum calcolato sul file nello storage del file server non corrisponda a quello fornito dal name server, oppure il file non venga trovato, il file server chiama una apposita RPC del name server per gestire l'inconsistenza operando sul database centrale. Questa RPC è \texttt{exposed\_handle\_inconsistency}.\\
+                Nel caso di inconsistenza, il name server cancella la replica sul file server chiamate, così che questa venga rimossa dal successivo garbage cleaning. Dopodiché, se si trattava di un file server primario ne assegna uno nuovo al file, dando priorità a quelli online che ne ospitano una copia. In caso contrario, la procedura termina.\\
+                Se non viene trovato alcun file server contenente una replica per il file, esso viene marcato come \texttt{corrupted}. I files corrotti non possono più essere reperiti dai clients, ma solo cancellati. I clients possono conoscere lo stato di ogni file di loro proprietà tramite la lista dei propri files sul FSD.
+
+                \begin{figure}[H]
+                    \centering
+                    \includegraphics[width = .4 \textwidth]{img/consistency.png}
+                    \caption{Interazioni name server/file servers per check di consistenza}
+                \end{figure}
+
+            \subparagraph{Garbage cleaning}
+
+                Il name server invia a tutti i file servers i nomi dei files in essi salvati. Questi nomi consistono in realtà del campo \texttt{file\_path} della tabella \texttt{files}, ovvero del path assoluto dei files nel FSD.\\
+                I file servers rimuovono tutti i files nel proprio storage che non compaiono nella lista ricevuta dal name server, più le directories rimaste vuote a seguito della rimozione.
+
+            \subparagraph{Eventual consistency}
+
+                Il concetto di eventual consistency è stato formalmente definito da Werner Vogels come segue: \textit{"Se non vengono eseguite nuove operazioni di aggiornamento, dopo un tempo sufficientemente lungo tutte le repliche del sistema convergeranno allo stesso stato"}.\\
+                Nel FSD realizzato, il name server, attraverso l'esecuzione dei tasks periodici descritti sopra, garantisce questa proprietà.
+
+                \begin{itemize}
+
+                    \item La replica fornisce ridondanza e disponibilità
+
+                    \item Il consistency check realizza sincronizzazione tra i files, prendendo come riferimento privilegiato il file server primario
+
+                    \item Il garbage cleaning rimuove files incongruenti per evitare incoerenza tra le repliche
+
+                \end{itemize}
+
+                In questo modo, anche in presenza di fallimenti temporanei o partizioni di rete, tutte le repliche alla fine rifletteranno uno stato coerente con la visione del name server.
+
+    \chapter{Conclusioni}
+
+        In questo progetto è stato realizzato un FSD con un’architettura fortemente centralizzata, in cui il name server gestisce la mappatura dei file, coordina le interazioni tra clients e file servers, e svolge varie operazioni per garantire consistenza.\\
+        Tra i propri punti di forza il sistema offre:
+
+        \begin{itemize}
+
+            \item Gestione centralizzata: riduce la complessità delle classi che non sono il name server e la logica delle interazioni tra loro
+
+            \item Un sistema di tasks periodici, i quali:
+
+            \begin{itemize}
+
+                \item Delegano per design quanto più lavoro possibile ai file servers, riducendo il carico sul name server e cercando di dare scalabilità al sistema
+
+                \item Garantiscono eventual consistency, oltre che tolleranza ai guasti e disponibilità
+
+            \end{itemize}
+
+        \end{itemize}
+
+        Tuttavia, sono presenti anche diverse limitazioni:
+
+        \begin{itemize}
+
+            \item SPOF: il funzionamento del name server è essenziale per quello dell'intero sistema, dunque una possibile rottura potrebbe rendere il tutto inutilizzabile
+
+            \item Scalabilità limitata: un'architettura fortemente centralizzata come quella proposta, con l'aggiunta di un alto numero di nodi potrebbe risentire pesantemente del carico di lavoro sul name server. Sebbene si sia cercato di scaricare il name server da ogni lavoro superfluo e comunque il sistema sia concepito per avere dimensioni limitate, questa problematica rimane una possibilità concreta
+
+        \end{itemize}
+
+        Una soluzione possibile a queste problematiche, perlopiù architetturali, potrebbe essere quella rifattorizzare l'intero progetto introducendo una nuova architettura completamente distribuita, ad esempio basata su Distributed Hash Tables (DHT). Anche il modello di consistenza potrebbe essere migliorato, aderendo a standard più potenti, pur incrementando significativamente la complessità del progetto.\\
+        In ultimo, se invece si pensasse che l'architettura attuale sia sufficiente per servire allo scopo, una modifica applicabile per migliorare le performances potrebbe essere la parallelizzazione del lancio dei tasks periodici, che nella versione base è sequenziale. Realizzare questa feature per l'hardware sul quale è stato realizzato il progetto non avrebbe avuto molto senso, anche perché i file servers attivi erano tipicamente al massimo 3 (sempre per la natura modesta del sistema).
 
 \end{document}

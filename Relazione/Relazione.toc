@@ -7,4 +7,11 @@
 \contentsline {paragraph}{\nonumberline Regular client}{5}{paragraph*.7}%
 \contentsline {paragraph}{\nonumberline Root clients}{5}{paragraph*.9}%
 \contentsline {chapter}{\numberline {3}Interazioni}{7}{chapter.3}%
+\contentsline {paragraph}{\nonumberline Upload e download}{7}{paragraph*.11}%
+\contentsline {paragraph}{\nonumberline Tasks periodici}{7}{paragraph*.13}%
+\contentsline {subparagraph}{\nonumberline Replicazione}{7}{subparagraph*.15}%
+\contentsline {subparagraph}{\nonumberline Check di consistenza}{8}{subparagraph*.17}%
+\contentsline {subparagraph}{\nonumberline Garbage cleaning}{9}{subparagraph*.19}%
+\contentsline {subparagraph}{\nonumberline Eventual consistency}{9}{subparagraph*.21}%
+\contentsline {chapter}{\numberline {4}Conclusioni}{10}{chapter.4}%
 \providecommand \tocbasic@end@toc@file {}\tocbasic@end@toc@file 
