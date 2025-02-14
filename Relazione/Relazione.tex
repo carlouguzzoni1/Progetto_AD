@@ -261,4 +261,38 @@
 
                 In questo modo, anche in presenza di fallimenti temporanei o partizioni di rete, tutte le repliche alla fine rifletteranno uno stato coerente con la visione del name server.
 
+    \chapter{Conclusioni}
+
+        In questo progetto è stato realizzato un FSD con un’architettura fortemente centralizzata, in cui il name server gestisce la mappatura dei file, coordina le interazioni tra clients e file servers, e svolge varie operazioni per garantire consistenza.\\
+        Tra i propri punti di forza il sistema offre:
+
+        \begin{itemize}
+
+            \item Gestione centralizzata: riduce la complessità delle classi che non sono il name server e la logica delle interazioni tra loro
+
+            \item Un sistema di tasks periodici, i quali:
+
+            \begin{itemize}
+
+                \item Delegano per design quanto più lavoro possibile ai file servers, riducendo il carico sul name server e cercando di dare scalabilità al sistema
+
+                \item Garantiscono eventual consistency, oltre che tolleranza ai guasti e disponibilità
+
+            \end{itemize}
+
+        \end{itemize}
+
+        Tuttavia, sono presenti anche diverse limitazioni:
+
+        \begin{itemize}
+
+            \item SPOF: il funzionamento del name server è essenziale per quello dell'intero sistema, dunque una possibile rottura potrebbe rendere il tutto inutilizzabile
+
+            \item Scalabilità limitata: un'architettura fortemente centralizzata come quella proposta, con l'aggiunta di un alto numero di nodi potrebbe risentire pesantemente del carico di lavoro sul name server. Sebbene si sia cercato di scaricare il name server da ogni lavoro superfluo e comunque il sistema sia concepito per avere dimensioni limitate, questa problematica rimane una possibilità concreta
+
+        \end{itemize}
+
+        Una soluzione possibile a queste problematiche, perlopiù architetturali, potrebbe essere quella rifattorizzare l'intero progetto introducendo una nuova architettura completamente distribuita, ad esempio basata su Distributed Hash Tables (DHT). Anche il modello di consistenza potrebbe essere migliorato, aderendo a standard più potenti, pur incrementando significativamente la complessità del progetto.\\
+        In ultimo, se invece si pensasse che l'architettura attuale sia sufficiente per servire allo scopo, una modifica applicabile per migliorare le performances potrebbe essere la parallelizzazione del lancio dei tasks periodici, che nella versione base è sequenziale. Realizzare questa feature per l'hardware sul quale è stato realizzato il progetto non avrebbe avuto molto senso, anche perché i file servers attivi erano tipicamente al massimo 3 (sempre per la natura modesta del sistema).
+
 \end{document}
