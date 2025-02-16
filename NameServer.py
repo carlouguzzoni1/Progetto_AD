@@ -1119,7 +1119,7 @@ class NameServerService(rpyc.Service):
             
             return {
                 "status":   False,
-                "message":  f"File '{file_path}' doesn't exist."
+                "message":  f"Either file '{file_path}' doesn't exist or it's not owned by the requestor."
                 }
         
         # If the file is corrupted, return an error message.
@@ -1232,6 +1232,30 @@ class NameServerService(rpyc.Service):
         
         conn    = sqlite3.connect(self.db_path)
         cursor  = conn.cursor()
+        
+        # Check whether the file exists.
+        try:
+            cursor.execute("""
+                SELECT file_path
+                FROM files
+                WHERE file_path = ?
+                AND owner = ?
+                """,
+                (file_path, username)
+                )
+            result = cursor.fetchone()
+        
+        except sqlite3.OperationalError as e:
+            print(f"Error selecting record for file:", e)
+            conn.close()
+            
+            return f"Error deleting file '{file_path}'."
+        
+        # If the file doesn't exist, return an error message.
+        if not result:
+            conn.close()
+            
+            return f"Either file '{file_path}' doesn't exist or it is not owned by the requestor."
         
         # Get all the file servers that host replicas of the file.
         try:
@@ -1394,14 +1418,22 @@ class NameServerService(rpyc.Service):
             print(f"Error selecting record for file:", e)
             conn.close()
             
-            return f"Error updating file '{file_path}'."
+            return {
+                "status":   False,
+                "message":  f"Error updating file '{file_path}'."
+                }
         
         # If the file does not exist, we can't update. Return an error message.
         if not result:
-            return f"Error updating file '{file_path}'. File does not exist."
+            return {
+                "status":   False,
+                "message":  f"Error updating file '{file_path}'. File does not exist."
+            }
         
         # Delete the file in the DFS.
-        self.exposed_delete_file(file_path, token)
+        result = self.exposed_delete_file(file_path, token)
+        
+        print(f"Deletion of file {file_path} upon update: {result}")
         
         # Re-upload the file.
         return self.exposed_get_file_server_upload(
@@ -2274,9 +2306,14 @@ class NameServerService(rpyc.Service):
                 
                 return
             
+            # NOTE: in realtà è opportuno mandare anche una lista vuota, per
+            #       coprire anche il raro caso in cui un nuovo file server
+            #       abbia ricevuto un solo file, che viene immediatamente can-
+            #       cellato.
+            
             # If there are no files for this file server, continue.
-            if not files:
-                continue
+            # if not files:
+            #     continue
             
             # Send the files to the file server.
             try:
@@ -2312,14 +2349,6 @@ if __name__ == "__main__":
     #       L'ordine è: replica, consistenza, pulizia.
     # TODO: implementare un lock per il master job.
     
-    print("Starting periodic replication job...")
-    scheduler.add_job(
-        name_server.periodic_replication_job,
-        args    = [K_REPLICAS],
-        trigger = 'interval',
-        seconds = PR_TIMEOUT
-        )
-    
     print("Starting periodic check activity job...")
     scheduler.add_job(
         name_server.periodic_check_activity,
@@ -2328,18 +2357,26 @@ if __name__ == "__main__":
         seconds = HB_TIMEOUT
         )
     
-    print("Starting periodic garbage collection job...")
+    print("Starting periodic replication job...")
     scheduler.add_job(
-        name_server.periodic_trigger_garbage_collection,
+        name_server.periodic_replication_job,
+        args    = [K_REPLICAS],
         trigger = 'interval',
-        seconds = GC_TIMEOUT
-    )
+        seconds = PR_TIMEOUT
+        )
     
     print("Starting periodic consistency check job...")
     scheduler.add_job(
         name_server.periodic_trigger_consistency_check,
         trigger = 'interval',
         seconds = CC_TIMEOUT
+    )
+    
+    print("Starting periodic garbage collection job...")
+    scheduler.add_job(
+        name_server.periodic_trigger_garbage_collection,
+        trigger = 'interval',
+        seconds = GC_TIMEOUT
     )
     
     scheduler.start()

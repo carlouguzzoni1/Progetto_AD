@@ -144,8 +144,9 @@ class RegularClient(BaseClient):
                 heartbeats.send_activity_heartbeat,
                 args=[self.conn, self.token],
                 trigger='interval',
-                seconds=30,
-                id="activity_heartbeat"
+                seconds=10,
+                id="activity_heartbeat",
+                misfire_grace_time=20
                 )
             
             # Start the scheduler.
